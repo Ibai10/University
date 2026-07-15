@@ -1,0 +1,25 @@
+# Blueprint de Render (https://render.com/docs/blueprint-spec).
+#
+# Con este archivo en la raíz del repo, en Render puedes hacer
+# "New +" -> "Blueprint", elegir tu repositorio, y Render configura el
+# servicio web solo (nombre, comando de arranque, variables de entorno a
+# rellenar). No hace falta rellenar el formulario a mano campo por campo.
+#
+# La base de datos NO se declara aquí a propósito: usamos Neon (gratis y
+# permanente) en vez del Postgres de Render (el gratuito caduca a los 30
+# días). Solo tienes que pegar la URL de conexión de Neon como variable de
+# entorno DATABASE_URL cuando Render te lo pida.
+
+services:
+  - type: web
+    name: eventos-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
