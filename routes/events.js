@@ -7,8 +7,6 @@ import { formatDateLabel } from "../dateFormat.js";
 
 export const eventsRouter = Router();
 
-const CATEGORIES = ["Graduaciones", "Universitarias", "Despedidas"];
-
 // La foto viaja como data URI en base64 dentro del JSON (ver notas de
 // diseño en el README). Ponemos un tope generoso pero razonable para que
 // nadie mande un archivo enorme sin querer y se quede la base de datos
@@ -108,8 +106,9 @@ eventsRouter.post("/", requireAuth, async (req, res, next) => {
     if (!title || !location || !event_date || !event_time) {
       return res.status(400).json({ error: "title, location, event_date y event_time son obligatorios." });
     }
-    if (!CATEGORIES.includes(category)) {
-      return res.status(400).json({ error: `category debe ser una de: ${CATEGORIES.join(", ")}` });
+    const venueName = String(category || "").trim();
+    if (!venueName) {
+      return res.status(400).json({ error: "category (el nombre de la discoteca) es obligatorio." });
     }
 
     const priceCents = Math.round(Number(price) * 100);
@@ -128,7 +127,7 @@ eventsRouter.post("/", requireAuth, async (req, res, next) => {
       `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, price_cents, capacity, image_base64)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [req.user.id, title, category, description || "", location, event_date, event_time, priceCents, cap, image || null]
+      [req.user.id, title, venueName, description || "", location, event_date, event_time, priceCents, cap, image || null]
     );
 
     res.status(201).json(await withAvailability(rows[0]));

@@ -29,6 +29,7 @@ export async function initDb() {
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
       name TEXT NOT NULL,
+      nickname TEXT,
       reset_code_hash TEXT,
       reset_code_salt TEXT,
       reset_code_expires_at TIMESTAMPTZ,
@@ -36,11 +37,24 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- El nombre de cada discoteca/sala. Sustituye a la lista fija de
+    -- categorías (Graduaciones/Universitarias/Despedidas): cualquiera
+    -- puede añadir una nueva desde la app, no hay que tocar el código
+    -- para eso. "category" en events sigue siendo texto libre (no una
+    -- clave foránea) para no forzar una migración de datos ya existentes;
+    -- esta tabla es solo la lista de nombres que ofrece el selector.
+    CREATE TABLE IF NOT EXISTS venues (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id SERIAL PRIMARY KEY,
       organizer_id INTEGER NOT NULL REFERENCES users(id),
       title TEXT NOT NULL,
-      category TEXT NOT NULL CHECK (category IN ('Graduaciones','Universitarias','Despedidas')),
+      category TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       location TEXT NOT NULL,
       event_date TEXT NOT NULL,          -- 'YYYY-MM-DD'
@@ -71,16 +85,27 @@ export async function initDb() {
       checked_in_at TIMESTAMPTZ
     );
 
-    -- Migración para bases de datos que ya existían antes de añadir la
-    -- recuperación de contraseña y las entradas individuales: a diferencia
-    -- de SQLite, Postgres sí deja añadir una columna "solo si no existe"
-    -- en una sola sentencia. Esto tiene que ir ANTES de los índices de
-    -- abajo — un índice sobre una columna que todavía no existe falla.
+    -- Migraciones para bases de datos que ya existían antes de estos
+    -- cambios. Van SIEMPRE antes de los índices/constraints que dependan
+    -- de las columnas nuevas — un índice sobre una columna que aún no
+    -- existe falla (ya nos pasó una vez).
     ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_hash TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_salt TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_expires_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_attempts INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
+
+    -- "category" ya no está limitado a 3 valores fijos (ahora son nombres
+    -- de discotecas, con lista abierta) — si la restricción antigua
+    -- existe todavía en una base de datos previa, se quita.
+    ALTER TABLE events DROP CONSTRAINT IF EXISTS events_category_check;
+
+    -- Únicos que ignoran mayúsculas/minúsculas: "Ibai10" y "ibai10" no
+    -- pueden coexistir como nicknames distintos, ni "Sala Vintage" y
+    -- "sala vintage" como dos discotecas distintas.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nickname_lower ON users (LOWER(nickname));
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_venues_name_lower ON venues (LOWER(name));
 
     CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_event ON tickets(event_id);

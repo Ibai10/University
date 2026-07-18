@@ -5,6 +5,7 @@ import { authRouter } from "./routes/auth.js";
 import { eventsRouter } from "./routes/events.js";
 import { meRouter } from "./routes/me.js";
 import { ticketVerifyRouter } from "./routes/tickets.js";
+import { venuesRouter } from "./routes/venues.js";
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/events", eventsRouter);
 app.use("/api/me", meRouter);
 app.use("/api/tickets", ticketVerifyRouter);
+app.use("/api/venues", venuesRouter);
 
 // Manejador de errores por si algo revienta de forma inesperada.
 app.use((err, req, res, next) => {

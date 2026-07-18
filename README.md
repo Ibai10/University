@@ -149,7 +149,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | Método | Ruta                        | Auth | Descripción |
 |--------|-----------------------------|:---:|-------------|
 | GET    | `/api/health`               |  —  | Comprobación de que la API está viva |
-| POST   | `/api/auth/register`        |  —  | Crea una cuenta. Body: `{ email, password, name }` |
+| POST   | `/api/auth/register`        |  —  | Crea una cuenta. Body: `{ email, password, name, nickname }` |
 | POST   | `/api/auth/login`           |  —  | Inicia sesión. Body: `{ email, password }` |
 | POST   | `/api/auth/forgot-password` |  —  | Pide un código de recuperación por email. Body: `{ email }` |
 | POST   | `/api/auth/reset-password`  |  —  | Cambia la contraseña con el código. Body: `{ email, code, newPassword }` |
@@ -163,6 +163,8 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas |
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
+| GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
+| POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` |
 
 ### Ejemplo rápido con curl
 
@@ -194,10 +196,11 @@ backend/
   middleware/
     requireAuth.js   protege rutas comprobando el token
   routes/
-    auth.js          registro / login
+    auth.js          registro (con nickname) / login / recuperar contraseña
     events.js         listar, crear, comprar, "mis fiestas"
     me.js             "mis entradas"
     tickets.js         validar por código (QR) + página pública de la entrada
+    venues.js          listar y añadir discotecas/salas
 ```
 
 ## Decisiones de diseño que conviene conocer
@@ -281,6 +284,17 @@ backend/
   texto**, igual que las contraseñas. Caduca a los 15 minutos y se
   bloquea tras 5 intentos fallidos (hay que pedir uno nuevo) — así no se
   puede adivinar a base de probar.
+- **El nickname es único ignorando mayúsculas/minúsculas** (`Ibai10` y
+  `ibai10` no pueden coexistir) — mismo enfoque que ya usábamos para el
+  email. Formato: 3-20 caracteres, sin espacios, letras (incluidas
+  acentuadas), números, guiones o puntos.
+- **Las discotecas ya no son una lista fija de 3 valores** ("category" ya
+  no tiene un `CHECK` que la limite a Graduaciones/Universitarias/
+  Despedidas). En su lugar, `venues` guarda los nombres que se van
+  añadiendo desde la app, y `events.category` sigue siendo texto libre —
+  no una clave foránea — para no forzar una migración de los datos que
+  ya existían. Los nombres de discoteca son únicos también ignorando
+  mayúsculas, para que no se dupliquen por un simple cambio de mayúscula.
 
 ## Próximos pasos naturales
 
@@ -302,3 +316,7 @@ backend/
   raro estando el proyecto todavía en pruebas; si hiciera falta migrarlas
   de verdad más adelante, se puede escribir un script que reparta cada
   fila antigua en N filas nuevas con `quantity=1` cada una.
+- Las cuentas creadas **antes** de añadir el nickname se quedan sin uno
+  (`nickname = NULL`) — no se les pide rellenarlo a la fuerza. Si algún
+  día hace falta, el paso natural es una pantalla de "completa tu perfil"
+  que se muestre una vez a quien inicie sesión sin nickname todavía.

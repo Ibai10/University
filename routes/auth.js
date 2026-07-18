@@ -15,31 +15,49 @@ function generateResetCode() {
   return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
 }
 
+// Letras (incluidas las acentuadas/ñ), números, guion, guion bajo y punto.
+// Sin espacios — así funciona bien como "@nickname" en pantalla.
+const NICKNAME_PATTERN = /^[\p{L}0-9_.-]{3,20}$/u;
+
 // POST /api/auth/register
 authRouter.post("/register", async (req, res, next) => {
   try {
-    const { email, password, name } = req.body || {};
+    const { email, password, name, nickname } = req.body || {};
 
-    if (!email || !password || !name) {
-      return res.status(400).json({ error: "email, password y name son obligatorios." });
+    if (!email || !password || !name || !nickname) {
+      return res.status(400).json({ error: "email, password, name y nickname son obligatorios." });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres." });
     }
 
+    const trimmedNickname = String(nickname).trim();
+    if (!NICKNAME_PATTERN.test(trimmedNickname)) {
+      return res.status(400).json({
+        error: "El nickname debe tener entre 3 y 20 caracteres, sin espacios (letras, números, guiones o puntos).",
+      });
+    }
+
     const normalizedEmail = String(email).toLowerCase().trim();
-    const existing = await pool.query("SELECT id FROM users WHERE email = $1", [normalizedEmail]);
-    if (existing.rows.length > 0) {
+    const existingEmail = await pool.query("SELECT id FROM users WHERE email = $1", [normalizedEmail]);
+    if (existingEmail.rows.length > 0) {
       return res.status(409).json({ error: "Ya existe una cuenta con ese email." });
+    }
+
+    const existingNickname = await pool.query("SELECT id FROM users WHERE LOWER(nickname) = LOWER($1)", [
+      trimmedNickname,
+    ]);
+    if (existingNickname.rows.length > 0) {
+      return res.status(409).json({ error: "Ese nickname ya está en uso. Prueba con otro." });
     }
 
     const { hash, salt } = hashPassword(password);
     const insert = await pool.query(
-      "INSERT INTO users (email, password_hash, password_salt, name) VALUES ($1, $2, $3, $4) RETURNING id",
-      [normalizedEmail, hash, salt, name]
+      "INSERT INTO users (email, password_hash, password_salt, name, nickname) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [normalizedEmail, hash, salt, name, trimmedNickname]
     );
 
-    const user = { id: insert.rows[0].id, email: normalizedEmail, name };
+    const user = { id: insert.rows[0].id, email: normalizedEmail, name, nickname: trimmedNickname };
     const token = signToken(user);
     res.status(201).json({ token, user });
   } catch (err) {
@@ -63,7 +81,7 @@ authRouter.post("/login", async (req, res, next) => {
       return res.status(401).json({ error: "Email o contraseña incorrectos." });
     }
 
-    const user = { id: row.id, email: row.email, name: row.name };
+    const user = { id: row.id, email: row.email, name: row.name, nickname: row.nickname };
     const token = signToken(user);
     res.json({ token, user });
   } catch (err) {
@@ -153,7 +171,7 @@ authRouter.post("/reset-password", async (req, res, next) => {
 
     // Te dejamos ya con sesión iniciada, para no obligarte a hacer login
     // aparte justo después de cambiar la contraseña.
-    const authUser = { id: user.id, email: user.email, name: user.name };
+    const authUser = { id: user.id, email: user.email, name: user.name, nickname: user.nickname };
     const token = signToken(authUser);
     res.json({ token, user: authUser });
   } catch (err) {
