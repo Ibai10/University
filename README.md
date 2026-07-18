@@ -117,7 +117,7 @@ Cuatro roles, guardados en `users.role`:
 |-----|-------|
 | `comprador` (por defecto) | Navegar y comprar entradas |
 | `organizador` | Todo lo del comprador + publicar/cancelar/borrar sus fiestas + añadir discotecas + validar entradas de sus propias fiestas |
-| `validador` | Todo lo del comprador + validar entradas de **cualquier** fiesta (pensado para personal de puerta que no organiza nada) |
+| `validador` | Validar entradas de **cualquier** fiesta. No puede comprar entradas ni organizar — su cuenta existe solo para hacer de puerta |
 | `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
 
 Nadie puede auto-asignarse `organizador`, `validador` ni `admin` al

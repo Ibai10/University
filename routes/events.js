@@ -143,7 +143,9 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
 // así cada persona del grupo se valida por separado en la puerta, y no
 // pasa que al escanear la entrada de uno se marquen como usadas las de
 // los demás.
-eventsRouter.post("/:id/purchase", requireAuth, async (req, res, next) => {
+// El rol 'validador' no puede comprar — su cuenta existe solo para
+// escanear entradas en la puerta, no como cliente.
+eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organizador", "admin"), async (req, res, next) => {
   try {
     const { rows: eventRows } = await pool.query(
       "SELECT * FROM events WHERE id = $1 AND status = 'published'",
