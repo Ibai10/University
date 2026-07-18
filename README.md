@@ -137,6 +137,80 @@ datos, no el token — si un admin te asciende a `organizador`, puedes
 publicar fiestas al momento, sin tener que cerrar sesión y volver a
 entrar.
 
+## Pago con tarjeta (Redsys / TPV Virtual)
+
+Redsys es el sistema que usan la mayoría de bancos españoles (Santander,
+BBVA, CaixaBank, Sabadell...) para cobrar con tarjeta. Funciona por
+**redirección**: la persona paga en la página del banco, no dentro de tu
+app ni de tu web — así nunca ves ni guardas un número de tarjeta.
+
+### Cómo funciona el flujo
+
+1. La app llama a `POST /api/events/:id/pay`. Esto **no crea ninguna
+   entrada todavía** — solo registra un "pedido" en estado `pending` y
+   devuelve una URL.
+2. La app abre esa URL en el navegador del móvil. Es una página nuestra
+   que arma el formulario de Redsys (firmado) y lo envía sola — de ahí
+   pasa ya a la página real del banco.
+3. La persona paga (o cancela) en la página del banco.
+4. Redsys avisa **a nuestro servidor directamente** (no al móvil) en
+   `POST /api/payments/notify`, con los datos firmados. Solo cuando esta
+   notificación llega y su firma es válida, se crean las entradas de
+   verdad — una fila por entrada, igual que en el resto de la app.
+5. Mientras tanto, la app pregunta `GET /api/payments/:orderCode/status`
+   cada pocos segundos hasta ver `paid` (o `failed`), y entonces muestra
+   la confirmación con las entradas ya creadas.
+
+### Probarlo ahora mismo, sin esperar al banco
+
+Redsys publica unas credenciales de **prueba** oficiales que funcionan
+sin tener todavía un contrato de TPV Virtual — por eso, si no rellenas
+nada en las variables `REDSYS_*`, el backend las usa automáticamente. Para
+probar un pago de principio a fin:
+
+- **Tarjeta que simula un pago aprobado**: `4548 8120 4940 0004`,
+  caducidad `12/34`, CVC `123`.
+- **Tarjeta que simula un pago denegado**: `1111 1111 1111 1117`.
+
+### Pasar a cobros reales
+
+Cuando tu banco te dé las credenciales de tu TPV Virtual (código de
+comercio, terminal y clave secreta), rellena estas tres variables y
+cambia el entorno — no hace falta tocar ni una línea de código:
+
+```
+REDSYS_ENVIRONMENT=production
+REDSYS_MERCHANT_CODE=tu-codigo-real
+REDSYS_TERMINAL=tu-terminal-real
+REDSYS_SECRET_KEY=tu-clave-secreta-real
+```
+
+Para conseguir esas credenciales: se piden **a tu banco** (no a Redsys
+directamente), como parte de contratar un "TPV Virtual" — normalmente
+piden tener actividad y web operativa (aviso legal, política de
+privacidad). El banco primero te da credenciales de _pruebas_ para que
+verifiques que todo funciona (que es justo lo que ya tienes montado y
+probado), y cuando confirmes que va bien, te da las de producción.
+
+### Cosas que conviene saber
+
+- **`POST /api/events/:id/purchase` (el que ya teníamos) se queda tal
+  cual**, sin pago real — sigue siendo útil para pruebas rápidas o
+  sembrar datos, pero la app ya no lo usa para comprar de verdad.
+- **La notificación de Redsys es la única fuente de verdad.** Lo que le
+  pase al navegador del cliente (si cierra la pestaña, si su móvil se
+  queda sin batería a mitad de pago...) no importa — en cuanto Redsys
+  confirme al servidor, las entradas se crean igualmente.
+- **Es resistente a reintentos**: si Redsys manda la misma notificación
+  dos veces (a veces pasa), la segunda no crea entradas duplicadas — se
+  detecta que el pedido ya se procesó y se ignora.
+- **Vuelve a comprobar el aforo en el momento de la confirmación**, no
+  solo al iniciar el pago — por si ha pasado tiempo y alguien más agotó
+  las entradas mientras tanto. Si eso ocurriera (pago aprobado pero sin
+  aforo ya), el pedido queda marcado como fallido y anotado en los logs
+  para gestionar un reembolso a mano — es un caso raro, pero puede pasar
+  sin una reserva temporal de aforo (mejora anotada más abajo).
+
 ## Email de la entrada al comprar
 
 Cuando alguien compra, recibe un email con "¡Esta es tu entrada!" y un
@@ -184,7 +258,10 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/events`               |  —  | Lista fiestas publicadas. Filtros opcionales: `?category=Despedidas&q=gijon` |
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
 | POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64) |
-| POST   | `/api/events/:id/purchase`  |  ✓  | Compra entradas. Body: `{ quantity }` |
+| POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
+| POST   | `/api/events/:id/pay`       |  ✓  | Inicia un pago DE VERDAD con Redsys. Body: `{ quantity }` → devuelve `{ orderCode, paymentUrl }` |
+| POST   | `/api/payments/notify`      |  —  | Webhook de Redsys (servidor a servidor) — no lo llama nadie a mano |
+| GET    | `/api/payments/:orderCode/status` |  ✓  | Estado de un pedido de pago: `pending` / `paid` / `failed` |
 | PATCH  | `/api/events/:id/cancel`    |  ✓  | Cancela tu fiesta (conserva las entradas ya vendidas) |
 | DELETE | `/api/events/:id`           |  ✓  | Borra tu fiesta — solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
@@ -219,19 +296,21 @@ backend/
   server.js          punto de entrada: monta Express y las rutas
   db.js              conexión PostgreSQL + creación de tablas
   auth.js            hash de contraseñas (scrypt) y JWT
+  redsys.js            firma y verificación de pagos con Redsys
   email.js            envío del email de la entrada (Resend)
   dateFormat.js        formatea fechas en español, compartido por email y la vista de entrada
   seed.js            datos de ejemplo (npm run seed)
   render.yaml         configuración de despliegue en Render
   middleware/
-    requireAuth.js   protege rutas comprobando el token
+    requireAuth.js   protege rutas comprobando el token y el rol
   routes/
     auth.js          registro (con nickname) / login / recuperar contraseña
-    events.js         listar, crear, comprar, "mis fiestas"
+    events.js         listar, crear, comprar/pagar, "mis fiestas"
     me.js             "mis entradas"
     tickets.js         validar por código (QR) + página pública de la entrada
     venues.js          listar y añadir discotecas/salas
     admin.js           buscar usuarios y cambiar su rol (solo admin)
+    payments.js         formulario de pago, webhook de Redsys, estado del pedido
 ```
 
 ## Decisiones de diseño que conviene conocer
@@ -329,9 +408,13 @@ backend/
 
 ## Próximos pasos naturales
 
-- Conectar el pago real con Stripe Connect: la compra dejaría de crear el
-  ticket al momento y pasaría a crearlo cuando Stripe confirme el pago
-  (webhook), reteniendo tu comisión y transfiriendo el resto al organizador.
+- **Reservar el aforo al iniciar el pago, no solo comprobarlo.** Ahora
+  mismo, entre que alguien empieza a pagar y Redsys confirma, ese aforo no
+  está "apartado" — si dos personas casi a la vez agotan las últimas
+  entradas, el segundo pago podría aprobarse sin que quede sitio (se
+  detecta y no se crea la entrada, pero ya se ha cobrado — necesitaría un
+  reembolso manual). El paso natural es un estado "reservado" con
+  caducidad de unos minutos mientras dura el pago.
 - **Los `validador` pueden validar entradas de cualquier fiesta, no solo
   de una en concreto.** Es la simplificación de partida: no existe (todavía)
   una relación de "este validador trabaja para este organizador/esta

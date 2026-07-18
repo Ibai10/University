@@ -91,6 +91,24 @@ export async function initDb() {
       checked_in_at TIMESTAMPTZ
     );
 
+    -- Un pedido de pago con Redsys. Se crea en 'pending' al iniciar el
+    -- pago (antes de que el cliente ni siquiera vea la página del banco);
+    -- pasa a 'paid' o 'failed' cuando llega la notificación de Redsys
+    -- confirmando el resultado. Las entradas (tickets) solo se crean de
+    -- verdad cuando el pedido pasa a 'paid' — nunca antes.
+    CREATE TABLE IF NOT EXISTS payment_orders (
+      id SERIAL PRIMARY KEY,
+      order_code TEXT UNIQUE NOT NULL,
+      event_id INTEGER NOT NULL REFERENCES events(id),
+      buyer_id INTEGER NOT NULL REFERENCES users(id),
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      amount_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','failed')),
+      redsys_response TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      paid_at TIMESTAMPTZ
+    );
+
     -- Migraciones para bases de datos que ya existían antes de estos
     -- cambios. Van SIEMPRE antes de los índices/constraints que dependan
     -- de las columnas nuevas — un índice sobre una columna que aún no
@@ -118,5 +136,6 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_tickets_event ON tickets(event_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_buyer ON tickets(buyer_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_order ON tickets(order_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_orders_buyer ON payment_orders(buyer_id);
   `);
 }

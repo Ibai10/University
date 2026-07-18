@@ -4,6 +4,7 @@ import { pool } from "../db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { sendTicketEmail } from "../email.js";
 import { formatDateLabel } from "../dateFormat.js";
+import { generateOrderCode } from "../redsys.js";
 
 export const eventsRouter = Router();
 
@@ -19,7 +20,7 @@ const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
 // (Antes esto solo contaba 'valid', así que en cuanto alguien validaba su
 // entrada, desaparecía del conteo de vendidas y "liberaba" aforo que en
 // realidad seguía ocupado — quedaba corregido aquí.)
-async function ticketStatsFor(eventId) {
+export async function ticketStatsFor(eventId) {
   const { rows } = await pool.query(
     `SELECT
        COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used')), 0) AS sold,
@@ -35,7 +36,7 @@ async function withAvailability(event) {
   return { ...event, sold, validated, available: Math.max(0, event.capacity - sold) };
 }
 
-function genCode() {
+export function genCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
   for (let i = 0; i < 8; i++) s += chars[crypto.randomInt(chars.length)];
@@ -202,6 +203,64 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
     next(err);
   }
 });
+
+// POST /api/events/:id/pay
+// Inicia un pago DE VERDAD con Redsys — a diferencia de /purchase (que
+// crea la entrada al momento, pensado para pruebas), aquí NO se crea
+// ninguna entrada todavía: solo se registra el pedido como 'pending' y se
+// devuelve la URL que la app debe abrir en el navegador del móvil para
+// que la persona pague en la página del banco. Las entradas se crean más
+// tarde, cuando llega la confirmación de Redsys en POST /api/payments/notify.
+eventsRouter.post(
+  "/:id/pay",
+  requireAuth,
+  requireRole("comprador", "organizador", "admin"),
+  async (req, res, next) => {
+    try {
+      const { rows: eventRows } = await pool.query(
+        "SELECT * FROM events WHERE id = $1 AND status = 'published'",
+        [req.params.id]
+      );
+      const event = eventRows[0];
+      if (!event) return res.status(404).json({ error: "Evento no encontrado." });
+
+      const quantity = Number(req.body?.quantity);
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        return res.status(400).json({ error: "quantity debe ser un entero mayor que 0." });
+      }
+
+      const { sold } = await ticketStatsFor(event.id);
+      const available = event.capacity - sold;
+      if (quantity > available) {
+        return res.status(409).json({ error: `Solo quedan ${available} entradas disponibles.` });
+      }
+
+      let orderCode = generateOrderCode();
+      while (
+        (await pool.query("SELECT id FROM payment_orders WHERE order_code = $1", [orderCode])).rows.length > 0
+      ) {
+        orderCode = generateOrderCode();
+      }
+
+      const amountCents = event.price_cents * quantity;
+      await pool.query(
+        `INSERT INTO payment_orders (order_code, event_id, buyer_id, quantity, amount_cents)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [orderCode, event.id, req.user.id, quantity, amountCents]
+      );
+
+      const publicUrl = process.env.PUBLIC_APP_URL || "http://localhost:3001";
+      res.status(201).json({
+        orderCode,
+        // La app abre esto en el navegador del móvil, no dentro de la app
+        // — Redsys tiene que mostrar la página del banco de verdad.
+        paymentUrl: `${publicUrl}/api/payments/${orderCode}/form`,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // PATCH /api/events/:id/cancel
 // Cancela una fiesta (no la borra): deja de ser comprable y de aparecer en

@@ -7,6 +7,7 @@ import { meRouter } from "./routes/me.js";
 import { ticketVerifyRouter } from "./routes/tickets.js";
 import { venuesRouter } from "./routes/venues.js";
 import { adminRouter } from "./routes/admin.js";
+import { paymentsRouter } from "./routes/payments.js";
 
 const app = express();
 
@@ -14,6 +15,10 @@ app.use(cors());
 // Límite más alto de lo normal: las fotos de las fiestas viajan como texto
 // en base64 dentro del JSON (ver notas en routes/events.js).
 app.use(express.json({ limit: "6mb" }));
+// Redsys manda su notificación de pago como formulario normal
+// (x-www-form-urlencoded), no como JSON — hace falta este analizador
+// aparte para poder leerla en routes/payments.js.
+app.use(express.urlencoded({ extended: false }));
 
 // Registra cada petición: método, ruta, código de respuesta y cuánto
 // tardó. Sin esto, los logs de Render no dicen nada cuando algo se queda
@@ -37,6 +42,7 @@ app.use("/api/me", meRouter);
 app.use("/api/tickets", ticketVerifyRouter);
 app.use("/api/venues", venuesRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/payments", paymentsRouter);
 
 // Manejador de errores por si algo revienta de forma inesperada.
 app.use((err, req, res, next) => {
