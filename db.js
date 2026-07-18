@@ -30,6 +30,12 @@ export async function initDb() {
       password_salt TEXT NOT NULL,
       name TEXT NOT NULL,
       nickname TEXT,
+      -- 'comprador' (por defecto, nadie se auto-asigna otro rol al
+      -- registrarse) | 'organizador' | 'validador' | 'admin'.
+      -- Sin CHECK a nivel de base de datos a propósito (igual que
+      -- "category" en events) — se valida en el código de las rutas,
+      -- para no repetir el lío de migrar constraints en Postgres.
+      role TEXT NOT NULL DEFAULT 'comprador',
       reset_code_hash TEXT,
       reset_code_salt TEXT,
       reset_code_expires_at TIMESTAMPTZ,
@@ -94,6 +100,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_expires_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_attempts INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
 
     -- "category" ya no está limitado a 3 valores fijos (ahora son nombres

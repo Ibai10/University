@@ -109,6 +109,34 @@ Esa URL (con `/api` al final) es la que tienes que poner en
   días y se borra. Neon es gratis y no caduca, por eso lo recomendamos para
   la base de datos en vez del Postgres del propio Render.
 
+## Sistema de roles
+
+Cuatro roles, guardados en `users.role`:
+
+| Rol | Puede |
+|-----|-------|
+| `comprador` (por defecto) | Navegar y comprar entradas |
+| `organizador` | Todo lo del comprador + publicar/cancelar/borrar sus fiestas + añadir discotecas + validar entradas de sus propias fiestas |
+| `validador` | Todo lo del comprador + validar entradas de **cualquier** fiesta (pensado para personal de puerta que no organiza nada) |
+| `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
+
+Nadie puede auto-asignarse `organizador`, `validador` ni `admin` al
+registrarse — siempre nace como `comprador`. Para nombrar al primer
+administrador sin tocar la base de datos a mano:
+
+1. Añade `ADMIN_EMAIL=tu-email@ejemplo.com` en las variables de entorno
+   (local y en Render).
+2. Inicia sesión (o regístrate, si esa cuenta es nueva) con ese email.
+3. Esa cuenta pasa a `admin` automáticamente en ese mismo momento.
+
+A partir de ahí, entra en el Perfil de la app → "Panel de administración"
+para buscar a cualquier otro usuario y cambiarle el rol.
+
+**Importante**: el rol se comprueba en cada petición leyendo la base de
+datos, no el token — si un admin te asciende a `organizador`, puedes
+publicar fiestas al momento, sin tener que cerrar sesión y volver a
+entrar.
+
 ## Email de la entrada al comprar
 
 Cuando alguien compra, recibe un email con "¡Esta es tu entrada!" y un
@@ -164,7 +192,9 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
-| POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` |
+| POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` — requiere rol organizador o admin |
+| GET    | `/api/admin/users`          |  ✓  | Busca usuarios por email/nickname/nombre (`?q=`) — solo admin |
+| PATCH  | `/api/admin/users/:id/role` |  ✓  | Cambia el rol de un usuario. Body: `{ role }` — solo admin |
 
 ### Ejemplo rápido con curl
 
@@ -201,6 +231,7 @@ backend/
     me.js             "mis entradas"
     tickets.js         validar por código (QR) + página pública de la entrada
     venues.js          listar y añadir discotecas/salas
+    admin.js           buscar usuarios y cambiar su rol (solo admin)
 ```
 
 ## Decisiones de diseño que conviene conocer
@@ -301,9 +332,12 @@ backend/
 - Conectar el pago real con Stripe Connect: la compra dejaría de crear el
   ticket al momento y pasaría a crearlo cuando Stripe confirme el pago
   (webhook), reteniendo tu comisión y transfiriendo el resto al organizador.
-- Añadir un campo `role` en `users` para distinguir organizador de
-  comprador, si en algún momento no quieres que cualquier usuario pueda
-  publicar fiestas.
+- **Los `validador` pueden validar entradas de cualquier fiesta, no solo
+  de una en concreto.** Es la simplificación de partida: no existe (todavía)
+  una relación de "este validador trabaja para este organizador/esta
+  fiesta". Si hiciera falta restringirlo, el paso natural es una tabla
+  `event_validators (event_id, user_id)` y comprobar esa asignación en
+  `POST /api/tickets/:code/checkin` en vez de aceptar el rol sin más.
 - Verificar un dominio propio en Resend para que los emails no salgan
   desde `onboarding@resend.dev`, y añadir un reenvío manual ("¿no te llegó
   el email? reenviar") desde la propia app.

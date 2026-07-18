@@ -19,6 +19,20 @@ function generateResetCode() {
 // Sin espacios — así funciona bien como "@nickname" en pantalla.
 const NICKNAME_PATTERN = /^[\p{L}0-9_.-]{3,20}$/u;
 
+// Cómo se crea el primer administrador sin tocar la base de datos a mano:
+// si defines ADMIN_EMAIL en las variables de entorno, la cuenta con ese
+// email se convierte en 'admin' automáticamente la próxima vez que
+// inicie sesión o se registre — no hace falta ya existir como admin para
+// nombrar al primero. Idempotente: si ya era admin, no hace nada.
+async function ensureAdminBootstrap(userId, email, currentRole) {
+  const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+  if (!adminEmail || email !== adminEmail || currentRole === "admin") {
+    return currentRole;
+  }
+  await pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [userId]);
+  return "admin";
+}
+
 // POST /api/auth/register
 authRouter.post("/register", async (req, res, next) => {
   try {
@@ -53,11 +67,13 @@ authRouter.post("/register", async (req, res, next) => {
 
     const { hash, salt } = hashPassword(password);
     const insert = await pool.query(
-      "INSERT INTO users (email, password_hash, password_salt, name, nickname) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      "INSERT INTO users (email, password_hash, password_salt, name, nickname) VALUES ($1, $2, $3, $4, $5) RETURNING id, role",
       [normalizedEmail, hash, salt, name, trimmedNickname]
     );
 
-    const user = { id: insert.rows[0].id, email: normalizedEmail, name, nickname: trimmedNickname };
+    const role = await ensureAdminBootstrap(insert.rows[0].id, normalizedEmail, insert.rows[0].role);
+
+    const user = { id: insert.rows[0].id, email: normalizedEmail, name, nickname: trimmedNickname, role };
     const token = signToken(user);
     res.status(201).json({ token, user });
   } catch (err) {
@@ -81,7 +97,9 @@ authRouter.post("/login", async (req, res, next) => {
       return res.status(401).json({ error: "Email o contraseña incorrectos." });
     }
 
-    const user = { id: row.id, email: row.email, name: row.name, nickname: row.nickname };
+    const role = await ensureAdminBootstrap(row.id, normalizedEmail, row.role);
+
+    const user = { id: row.id, email: row.email, name: row.name, nickname: row.nickname, role };
     const token = signToken(user);
     res.json({ token, user });
   } catch (err) {
@@ -171,7 +189,7 @@ authRouter.post("/reset-password", async (req, res, next) => {
 
     // Te dejamos ya con sesión iniciada, para no obligarte a hacer login
     // aparte justo después de cambiar la contraseña.
-    const authUser = { id: user.id, email: user.email, name: user.name, nickname: user.nickname };
+    const authUser = { id: user.id, email: user.email, name: user.name, nickname: user.nickname, role: user.role };
     const token = signToken(authUser);
     res.json({ token, user: authUser });
   } catch (err) {

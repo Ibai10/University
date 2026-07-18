@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { pool } from "../db.js";
-import { requireAuth } from "../middleware/requireAuth.js";
+import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 
 export const venuesRouter = Router();
 
@@ -17,10 +17,9 @@ venuesRouter.get("/", async (req, res, next) => {
 });
 
 // POST /api/venues
-// Añade una discoteca nueva a la lista. Cualquier usuario autenticado
-// puede añadir una (igual que cualquiera puede organizar una fiesta) —
-// no hace falta tocar código para que aparezcan nuevas.
-venuesRouter.post("/", requireAuth, async (req, res, next) => {
+// Añade una discoteca nueva a la lista. Solo organizador o admin — igual
+// que publicar una fiesta, no tiene sentido dejarlo abierto a compradores.
+venuesRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const name = String(req.body?.name || "").trim();
     if (!name) {

@@ -1,16 +1,19 @@
 import { Router } from "express";
 import QRCode from "qrcode";
 import { pool } from "../db.js";
-import { requireAuth } from "../middleware/requireAuth.js";
+import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { formatDateLabel } from "../dateFormat.js";
 
 export const ticketVerifyRouter = Router();
 
 // POST /api/tickets/:code/checkin
 // Valida una entrada por su código (el que lleva el QR) y la marca como
-// usada. Solo puede hacerlo el organizador dueño de la fiesta a la que
-// pertenece esa entrada — así alguien no puede validar entradas ajenas.
-ticketVerifyRouter.post("/:code/checkin", requireAuth, async (req, res, next) => {
+// usada. Puede hacerlo: el organizador dueño de esa fiesta, cualquier
+// 'validador' (pensado para personal de puerta que no organiza nada, y
+// que por ahora puede validar en cualquier fiesta — repartir validadores
+// por fiesta concreta queda anotado como mejora futura en el README), o
+// un 'admin'.
+ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador", "validador", "admin"), async (req, res, next) => {
   try {
     const code = req.params.code.trim().toUpperCase();
 
@@ -27,7 +30,8 @@ ticketVerifyRouter.post("/:code/checkin", requireAuth, async (req, res, next) =>
     if (!ticket) {
       return res.status(404).json({ error: "Esa entrada no existe. Revisa el código." });
     }
-    if (ticket.organizer_id !== req.user.id) {
+    const canValidateAny = req.user.role === "admin" || req.user.role === "validador";
+    if (!canValidateAny && ticket.organizer_id !== req.user.id) {
       return res.status(403).json({ error: "Esta entrada no pertenece a ninguna de tus fiestas." });
     }
     if (ticket.status === "used") {

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import { pool } from "../db.js";
-import { requireAuth } from "../middleware/requireAuth.js";
+import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { sendTicketEmail } from "../email.js";
 import { formatDateLabel } from "../dateFormat.js";
 
@@ -96,10 +96,9 @@ eventsRouter.get("/:id", async (req, res, next) => {
 });
 
 // POST /api/events
-// Crea una fiesta. Cualquier usuario autenticado puede organizar (para
-// convertir esto en un rol "organizador" aparte, añade una columna role
-// en users y comprueba req.user aquí).
-eventsRouter.post("/", requireAuth, async (req, res, next) => {
+// Crea una fiesta. Solo organizador o admin — un comprador normal no
+// puede publicar (esto es justo lo que separa el rol "organizador").
+eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const { title, category, description, location, event_date, event_time, price, capacity, image } = req.body || {};
 
@@ -206,12 +205,12 @@ eventsRouter.post("/:id/purchase", requireAuth, async (req, res, next) => {
 // Cancela una fiesta (no la borra): deja de ser comprable y de aparecer en
 // el listado público, pero las entradas ya vendidas y su historial se
 // conservan intactos — quien ya compró sigue teniendo su entrada.
-eventsRouter.patch("/:id/cancel", requireAuth, async (req, res, next) => {
+eventsRouter.patch("/:id/cancel", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
     const event = rows[0];
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
-    if (event.organizer_id !== req.user.id) {
+    if (event.organizer_id !== req.user.id && req.user.role !== "admin") {
       return res.status(403).json({ error: "Esta fiesta no es tuya." });
     }
     if (event.status === "cancelled") {
@@ -229,12 +228,12 @@ eventsRouter.patch("/:id/cancel", requireAuth, async (req, res, next) => {
 // Borra la fiesta de verdad — solo si nadie ha comprado entradas todavía.
 // Si ya se vendió alguna, se rechaza y se sugiere cancelar en su lugar,
 // para no destruir el historial de compra de quien ya pagó.
-eventsRouter.delete("/:id", requireAuth, async (req, res, next) => {
+eventsRouter.delete("/:id", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
     const event = rows[0];
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
-    if (event.organizer_id !== req.user.id) {
+    if (event.organizer_id !== req.user.id && req.user.role !== "admin") {
       return res.status(403).json({ error: "Esta fiesta no es tuya." });
     }
 

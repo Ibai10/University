@@ -22,17 +22,23 @@ async function main() {
 
   const organizerPass = hashPassword("organiza123");
   const organizerResult = await pool.query(
-    "INSERT INTO users (email, password_hash, password_salt, name) VALUES ($1, $2, $3, $4) RETURNING id",
-    ["organizador@ejemplo.com", organizerPass.hash, organizerPass.salt, "Sala Vintage Eventos"]
+    "INSERT INTO users (email, password_hash, password_salt, name, role) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    ["organizador@ejemplo.com", organizerPass.hash, organizerPass.salt, "Sala Vintage Eventos", "organizador"]
   );
   const organizerId = organizerResult.rows[0].id;
 
   const buyerPass = hashPassword("entrada123");
   const buyerResult = await pool.query(
-    "INSERT INTO users (email, password_hash, password_salt, name) VALUES ($1, $2, $3, $4) RETURNING id",
-    ["invitado@ejemplo.com", buyerPass.hash, buyerPass.salt, "Invitado"]
+    "INSERT INTO users (email, password_hash, password_salt, name, role) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    ["invitado@ejemplo.com", buyerPass.hash, buyerPass.salt, "Invitado", "comprador"]
   );
   const buyerId = buyerResult.rows[0].id;
+
+  const validatorPass = hashPassword("validador123");
+  await pool.query(
+    "INSERT INTO users (email, password_hash, password_salt, name, role) VALUES ($1, $2, $3, $4, $5)",
+    ["validador@ejemplo.com", validatorPass.hash, validatorPass.salt, "Puerta", "validador"]
+  );
 
   const events = [
     {
@@ -127,6 +133,7 @@ async function main() {
   console.log("Datos de ejemplo creados:");
   console.log(`- Organizador: organizador@ejemplo.com / organiza123`);
   console.log(`- Comprador:   invitado@ejemplo.com / entrada123`);
+  console.log(`- Validador:   validador@ejemplo.com / validador123`);
   console.log(`- ${events.length} fiestas publicadas, ${samplePurchases.length} compras de ejemplo.`);
   await pool.end();
 }
