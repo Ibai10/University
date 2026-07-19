@@ -54,3 +54,29 @@ export function requireRole(...allowedRoles) {
     next();
   };
 }
+
+// Como requireAuth, pero nunca rechaza la petición — si no hay token (o no
+// es válido), simplemente sigue con req.user = null. Sirve para rutas
+// públicas que aun así necesitan saber "¿quién pregunta, si es que alguien
+// ha iniciado sesión?" — por ejemplo, el listado de fiestas necesita saber
+// si quien pregunta pertenece a una residencia, para enseñarle también las
+// fiestas exclusivas de esa residencia, sin dejar de ser una ruta pública.
+export async function optionalAuth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+
+  if (!token) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const payload = verifyToken(token);
+    const { rows } = await pool.query("SELECT id, role, residencia_id FROM users WHERE id = $1", [payload.id]);
+    req.user = rows[0] ? { ...payload, role: rows[0].role, residenciaId: rows[0].residencia_id } : null;
+  } catch {
+    req.user = null;
+  }
+
+  next();
+}

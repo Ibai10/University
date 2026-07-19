@@ -1,7 +1,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import { pool } from "../db.js";
-import { requireAuth, requireRole } from "../middleware/requireAuth.js";
+import { requireAuth, requireRole, optionalAuth } from "../middleware/requireAuth.js";
 import { sendTicketEmail } from "../email.js";
 import { formatDateLabel } from "../dateFormat.js";
 import { generateOrderCode } from "../redsys.js";
@@ -33,7 +33,9 @@ export async function ticketStatsFor(eventId) {
 
 async function withAvailability(event) {
   const { sold, validated } = await ticketStatsFor(event.id);
-  return { ...event, sold, validated, available: Math.max(0, event.capacity - sold) };
+  const { residencia_name, ...rest } = event;
+  const residencia = event.residencia_id ? { id: event.residencia_id, name: residencia_name } : null;
+  return { ...rest, sold, validated, available: Math.max(0, event.capacity - sold), residencia };
 }
 
 export function genCode() {
@@ -44,22 +46,38 @@ export function genCode() {
 }
 
 // GET /api/events?category=Graduaciones&q=oviedo
-// Lista pública de fiestas publicadas, con disponibilidad calculada al vuelo.
-eventsRouter.get("/", async (req, res, next) => {
+// Lista pública de fiestas publicadas, con disponibilidad calculada al
+// vuelo. Sigue siendo pública (no exige sesión) pero usa optionalAuth
+// para saber, SI hay alguien identificado, a qué residencia pertenece —
+// así puede enseñarle también las fiestas exclusivas de esa residencia,
+// que nadie más ve en este mismo listado.
+eventsRouter.get("/", optionalAuth, async (req, res, next) => {
   try {
     const { category, q } = req.query;
-    let sql = "SELECT * FROM events WHERE status = 'published'";
+    let sql = `
+      SELECT events.*, residencias.name AS residencia_name
+      FROM events
+      LEFT JOIN residencias ON residencias.id = events.residencia_id
+      WHERE events.status = 'published'
+    `;
     const params = [];
+
+    if (req.user?.residenciaId) {
+      params.push(req.user.residenciaId);
+      sql += ` AND (events.residencia_id IS NULL OR events.residencia_id = $${params.length})`;
+    } else {
+      sql += ` AND events.residencia_id IS NULL`;
+    }
 
     if (category && category !== "Todas") {
       params.push(category);
-      sql += ` AND category = $${params.length}`;
+      sql += ` AND events.category = $${params.length}`;
     }
     if (q) {
       params.push(`%${q}%`, `%${q}%`);
-      sql += ` AND (title ILIKE $${params.length - 1} OR location ILIKE $${params.length})`;
+      sql += ` AND (events.title ILIKE $${params.length - 1} OR events.location ILIKE $${params.length})`;
     }
-    sql += " ORDER BY event_date ASC, event_time ASC";
+    sql += " ORDER BY events.event_date ASC, events.event_time ASC";
 
     const { rows } = await pool.query(sql, params);
     const withStats = await Promise.all(rows.map(withAvailability));
@@ -75,7 +93,11 @@ eventsRouter.get("/", async (req, res, next) => {
 eventsRouter.get("/mine", requireAuth, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM events WHERE organizer_id = $1 ORDER BY created_at DESC",
+      `SELECT events.*, residencias.name AS residencia_name
+       FROM events
+       LEFT JOIN residencias ON residencias.id = events.residencia_id
+       WHERE events.organizer_id = $1
+       ORDER BY events.created_at DESC`,
       [req.user.id]
     );
     const withStats = await Promise.all(rows.map(withAvailability));
@@ -86,11 +108,25 @@ eventsRouter.get("/mine", requireAuth, async (req, res, next) => {
 });
 
 // GET /api/events/:id
-eventsRouter.get("/:id", async (req, res, next) => {
+eventsRouter.get("/:id", optionalAuth, async (req, res, next) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: "Evento no encontrado." });
-    res.json(await withAvailability(rows[0]));
+    const { rows } = await pool.query(
+      `SELECT events.*, residencias.name AS residencia_name
+       FROM events
+       LEFT JOIN residencias ON residencias.id = events.residencia_id
+       WHERE events.id = $1`,
+      [req.params.id]
+    );
+    const event = rows[0];
+    if (!event) return res.status(404).json({ error: "Evento no encontrado." });
+
+    // Si es exclusiva de una residencia, solo la ve quien pertenezca a
+    // ella (o un admin, que ve todo).
+    if (event.residencia_id && event.residencia_id !== req.user?.residenciaId && req.user?.role !== "admin") {
+      return res.status(404).json({ error: "Evento no encontrado." });
+    }
+
+    res.json(await withAvailability(event));
   } catch (err) {
     next(err);
   }
@@ -101,7 +137,8 @@ eventsRouter.get("/:id", async (req, res, next) => {
 // puede publicar (esto es justo lo que separa el rol "organizador").
 eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
-    const { title, category, description, location, event_date, event_time, price, capacity, image } = req.body || {};
+    const { title, category, description, location, event_date, event_time, price, capacity, image, residencia_id } =
+      req.body || {};
 
     if (!title || !location || !event_date || !event_time) {
       return res.status(400).json({ error: "title, location, event_date y event_time son obligatorios." });
@@ -123,14 +160,28 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
       return res.status(400).json({ error: "La imagen es demasiado grande o no es válida." });
     }
 
+    let residenciaId = null;
+    let residenciaName = null;
+    if (residencia_id) {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Solo un admin puede marcar una fiesta como exclusiva de una residencia." });
+      }
+      const residenciaCheck = await pool.query("SELECT id, name FROM residencias WHERE id = $1", [residencia_id]);
+      if (!residenciaCheck.rows[0]) {
+        return res.status(400).json({ error: "Esa residencia no existe." });
+      }
+      residenciaId = residenciaCheck.rows[0].id;
+      residenciaName = residenciaCheck.rows[0].name;
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, price_cents, capacity, image_base64)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, price_cents, capacity, image_base64, residencia_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [req.user.id, title, venueName, description || "", location, event_date, event_time, priceCents, cap, image || null]
+      [req.user.id, title, venueName, description || "", location, event_date, event_time, priceCents, cap, image || null, residenciaId]
     );
 
-    res.status(201).json(await withAvailability(rows[0]));
+    res.status(201).json(await withAvailability({ ...rows[0], residencia_name: residenciaName }));
   } catch (err) {
     next(err);
   }

@@ -56,6 +56,19 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Una residencia de estudiantes. Solo un admin puede crear una (botón
+    -- en el panel de administración) — al crearla se genera un código
+    -- único que se le da a los residentes; quien lo introduce en la app
+    -- pasa a ver las fiestas que se publiquen en exclusiva para esa
+    -- residencia (ver events.residencia_id más abajo).
+    CREATE TABLE IF NOT EXISTS residencias (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      code TEXT UNIQUE NOT NULL,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id SERIAL PRIMARY KEY,
       organizer_id INTEGER NOT NULL REFERENCES users(id),
@@ -69,6 +82,10 @@ export async function initDb() {
       capacity INTEGER NOT NULL CHECK (capacity > 0),
       status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published','cancelled')),
       image_base64 TEXT,
+      -- NULL = fiesta pública normal, visible para todo el mundo (como
+      -- hasta ahora). Con un valor = exclusiva para quien pertenezca a
+      -- esa residencia; el resto de la gente ni la ve en el listado.
+      residencia_id INTEGER REFERENCES residencias(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -121,6 +138,11 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
 
+    -- A qué residencia pertenece este usuario (NULL = a ninguna) — se
+    -- rellena al introducir el código de una residencia en la app.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
+
     -- "category" ya no está limitado a 3 valores fijos (ahora son nombres
     -- de discotecas, con lista abierta) — si la restricción antigua
     -- existe todavía en una base de datos previa, se quita.
@@ -137,5 +159,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_tickets_buyer ON tickets(buyer_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_order ON tickets(order_id);
     CREATE INDEX IF NOT EXISTS idx_payment_orders_buyer ON payment_orders(buyer_id);
+    CREATE INDEX IF NOT EXISTS idx_users_residencia ON users(residencia_id);
+    CREATE INDEX IF NOT EXISTS idx_events_residencia ON events(residencia_id);
   `);
 }

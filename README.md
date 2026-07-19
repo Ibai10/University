@@ -137,6 +137,33 @@ datos, no el token — si un admin te asciende a `organizador`, puedes
 publicar fiestas al momento, sin tener que cerrar sesión y volver a
 entrar.
 
+## Residencias de estudiantes
+
+Una residencia es un grupo cerrado con su propio código de acceso: quien
+lo introduce pasa a ver, además del listado público normal, las fiestas
+que se hayan marcado como exclusivas de esa residencia — nadie más las ve.
+
+- **Solo un admin puede crear una residencia** (`POST /api/residencias`),
+  y al crearla se genera un código único al momento (8 caracteres, sin
+  0/O ni 1/I para que no se confundan al escribirlo a mano).
+- **Cualquier usuario se une con ese código** (`POST /api/residencias/join`)
+  — pasa a guardarse en `users.residencia_id`. Puede salir cuando quiera
+  (`POST /api/residencias/leave`) o unirse a otra distinta más adelante
+  (el código nuevo simplemente sustituye al anterior).
+- **Solo un admin puede marcar una fiesta como exclusiva** de una
+  residencia al publicarla (`POST /api/events` admite un `residencia_id`
+  opcional) — un organizador normal solo publica fiestas públicas.
+- **La visibilidad se aplica en dos sitios**: el listado (`GET
+  /api/events`) simplemente no incluye las fiestas exclusivas de
+  residencias a las que no perteneces, y el detalle de una fiesta
+  concreta (`GET /api/events/:id`) también lo comprueba — no basta con no
+  aparecer en el listado, tampoco se puede abrir directamente por su id.
+  Un admin sí ve todo, sea de la residencia que sea.
+- **`category` (el nombre de la discoteca) y `residencia_id` son cosas
+  independientes** — una fiesta exclusiva de una residencia sigue
+  teniendo su discoteca/sala normal, la residencia solo decide quién
+  puede verla, no dónde se celebra.
+
 ## Pago con tarjeta (Redsys / TPV Virtual)
 
 Redsys es el sistema que usan la mayoría de bancos españoles (Santander,
@@ -272,6 +299,10 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` — requiere rol organizador o admin |
 | GET    | `/api/admin/users`          |  ✓  | Busca usuarios por email/nickname/nombre (`?q=`) — solo admin |
 | PATCH  | `/api/admin/users/:id/role` |  ✓  | Cambia el rol de un usuario. Body: `{ role }` — solo admin |
+| GET    | `/api/residencias`          |  ✓  | Lista las residencias con su código — solo admin |
+| POST   | `/api/residencias`          |  ✓  | Crea una residencia y le genera un código único. Body: `{ name }` — solo admin |
+| POST   | `/api/residencias/join`     |  ✓  | Te une a una residencia por su código. Body: `{ code }` |
+| POST   | `/api/residencias/leave`    |  ✓  | Dejas de pertenecer a tu residencia actual |
 
 ### Ejemplo rápido con curl
 
@@ -311,6 +342,7 @@ backend/
     venues.js          listar y añadir discotecas/salas
     admin.js           buscar usuarios y cambiar su rol (solo admin)
     payments.js         formulario de pago, webhook de Redsys, estado del pedido
+    residencias.js       crear residencias, unirse por código (solo admin crea)
 ```
 
 ## Decisiones de diseño que conviene conocer
@@ -407,6 +439,11 @@ backend/
   mayúsculas, para que no se dupliquen por un simple cambio de mayúscula.
 
 ## Próximos pasos naturales
+
+- **Merchandising por residencia** — pendiente de decidir el alcance (¿solo
+  catálogo para ver, o ya se puede comprar con Redsys como las entradas?)
+  antes de construirlo. La tabla `residencias` ya existe y está lista
+  para colgar de ahí un catálogo de productos cuando se decida.
 
 - **Reservar el aforo al iniciar el pago, no solo comprobarlo.** Ahora
   mismo, entre que alguien empieza a pagar y Redsys confirma, ese aforo no
