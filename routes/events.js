@@ -62,7 +62,11 @@ eventsRouter.get("/", optionalAuth, async (req, res, next) => {
     `;
     const params = [];
 
-    if (req.user?.residenciaId) {
+    // Un admin ve todo, sea de la residencia que sea (igual que ya hacía
+    // el detalle de una fiesta individual — aquí se me había olvidado).
+    if (req.user?.role === "admin") {
+      // sin filtro de residencia
+    } else if (req.user?.residenciaId) {
       params.push(req.user.residenciaId);
       sql += ` AND (events.residencia_id IS NULL OR events.residencia_id = $${params.length})`;
     } else {
