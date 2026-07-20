@@ -126,6 +126,21 @@ export async function initDb() {
       paid_at TIMESTAMPTZ
     );
 
+    -- Catálogo de merchandising por residencia — de momento solo para
+    -- ver (no hay compra todavía). Solo un admin añade productos; solo
+    -- quien pertenezca a esa residencia (o un admin) los ve, igual que
+    -- las fiestas exclusivas.
+    CREATE TABLE IF NOT EXISTS merchandise (
+      id SERIAL PRIMARY KEY,
+      residencia_id INTEGER NOT NULL REFERENCES residencias(id),
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+      image_base64 TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     -- Migraciones para bases de datos que ya existían antes de estos
     -- cambios. Van SIEMPRE antes de los índices/constraints que dependan
     -- de las columnas nuevas — un índice sobre una columna que aún no
@@ -161,5 +176,6 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_payment_orders_buyer ON payment_orders(buyer_id);
     CREATE INDEX IF NOT EXISTS idx_users_residencia ON users(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_events_residencia ON events(residencia_id);
+    CREATE INDEX IF NOT EXISTS idx_merchandise_residencia ON merchandise(residencia_id);
   `);
 }

@@ -85,3 +85,79 @@ residenciasRouter.post("/leave", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+const MAX_MERCH_IMAGE_LENGTH = 4 * 1024 * 1024;
+
+// GET /api/residencias/:id/merchandise
+// El catálogo de una residencia — solo lo ve quien pertenezca a ella (o
+// un admin). Mismo criterio que las fiestas exclusivas: si no es lo tuyo,
+// ni te enteras de que existe (404, no 403).
+residenciasRouter.get("/:id/merchandise", requireAuth, async (req, res, next) => {
+  try {
+    const residenciaId = Number(req.params.id);
+    const belongs = req.user.residenciaId === residenciaId;
+    if (!belongs && req.user.role !== "admin") {
+      return res.status(404).json({ error: "Residencia no encontrada." });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT * FROM merchandise WHERE residencia_id = $1 ORDER BY created_at DESC",
+      [residenciaId]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/residencias/:id/merchandise
+// Añade un producto al catálogo — solo admin. Body: { name, description,
+// price, image }.
+residenciasRouter.post("/:id/merchandise", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const residenciaId = Number(req.params.id);
+    const residenciaCheck = await pool.query("SELECT id FROM residencias WHERE id = $1", [residenciaId]);
+    if (!residenciaCheck.rows[0]) {
+      return res.status(404).json({ error: "Residencia no encontrada." });
+    }
+
+    const { name, description, price, image } = req.body || {};
+    const trimmedName = String(name || "").trim();
+    if (!trimmedName) {
+      return res.status(400).json({ error: "El nombre del producto es obligatorio." });
+    }
+
+    const priceCents = Math.round(Number(price) * 100);
+    if (!Number.isFinite(priceCents) || priceCents < 0) {
+      return res.status(400).json({ error: "price debe ser un número mayor o igual a 0." });
+    }
+    if (image && (typeof image !== "string" || image.length > MAX_MERCH_IMAGE_LENGTH)) {
+      return res.status(400).json({ error: "La imagen es demasiado grande o no es válida." });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO merchandise (residencia_id, name, description, price_cents, image_base64, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [residenciaId, trimmedName, description || "", priceCents, image || null, req.user.id]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/residencias/:id/merchandise/:itemId
+// Quita un producto del catálogo — solo admin.
+residenciasRouter.delete("/:id/merchandise/:itemId", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "DELETE FROM merchandise WHERE id = $1 AND residencia_id = $2 RETURNING id",
+      [req.params.itemId, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Producto no encontrado." });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});

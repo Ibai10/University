@@ -28,11 +28,11 @@ export async function requireAuth(req, res, next) {
   }
 
   try {
-    const { rows } = await pool.query("SELECT id, role FROM users WHERE id = $1", [payload.id]);
+    const { rows } = await pool.query("SELECT id, role, residencia_id FROM users WHERE id = $1", [payload.id]);
     if (rows.length === 0) {
       return res.status(401).json({ error: "Tu sesión ya no es válida. Vuelve a iniciar sesión." });
     }
-    req.user = { ...payload, role: rows[0].role };
+    req.user = { ...payload, role: rows[0].role, residenciaId: rows[0].residencia_id };
   } catch (err) {
     return next(err);
   }

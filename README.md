@@ -163,6 +163,27 @@ que se hayan marcado como exclusivas de esa residencia — nadie más las ve.
   independientes** — una fiesta exclusiva de una residencia sigue
   teniendo su discoteca/sala normal, la residencia solo decide quién
   puede verla, no dónde se celebra.
+- **Cada residencia tiene su propio catálogo de merchandising** (sudaderas,
+  camisetas...) — de momento solo para ver, **no se puede comprar
+  todavía**. Solo un admin añade o borra productos
+  (`POST`/`DELETE /api/residencias/:id/merchandise`); solo quien
+  pertenezca a esa residencia (o un admin) puede verlo
+  (`GET /api/residencias/:id/merchandise`) — mismo criterio de
+  visibilidad que las fiestas exclusivas.
+
+**Dos fallos reales que se corrigieron construyendo esto, por si te
+resulta útil el porqué**:
+1. El listado de fiestas (`GET /api/events`) daba por hecho que un admin
+   siempre vería todo, pero solo lo comprobaba en el detalle de una
+   fiesta individual, no en el propio listado — un admin que no
+   pertenecía a la residencia en cuestión no veía sus fiestas exclusivas
+   tampoco. Ya corregido en ambos sitios.
+2. Más importante: la app pedía el listado de fiestas **sin mandar la
+   sesión del usuario** (era una llamada pensada como pública desde el
+   principio, de antes de que existieran las residencias) — así que el
+   backend nunca sabía quién preguntaba, para nadie, ni admin ni
+   comprador. `fetchEvents()` en el frontend ahora manda el token si lo
+   tiene.
 
 ## Pago con tarjeta (Redsys / TPV Virtual)
 
@@ -303,6 +324,9 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/residencias`          |  ✓  | Crea una residencia y le genera un código único. Body: `{ name }` — solo admin |
 | POST   | `/api/residencias/join`     |  ✓  | Te une a una residencia por su código. Body: `{ code }` |
 | POST   | `/api/residencias/leave`    |  ✓  | Dejas de pertenecer a tu residencia actual |
+| GET    | `/api/residencias/:id/merchandise` |  ✓  | Catálogo de una residencia — solo lo ve quien pertenezca a ella (o admin) |
+| POST   | `/api/residencias/:id/merchandise` |  ✓  | Añade un producto al catálogo. Body: `{ name, description, price, image }` — solo admin |
+| DELETE | `/api/residencias/:id/merchandise/:itemId` |  ✓  | Borra un producto del catálogo — solo admin |
 
 ### Ejemplo rápido con curl
 
@@ -342,7 +366,7 @@ backend/
     venues.js          listar y añadir discotecas/salas
     admin.js           buscar usuarios y cambiar su rol (solo admin)
     payments.js         formulario de pago, webhook de Redsys, estado del pedido
-    residencias.js       crear residencias, unirse por código (solo admin crea)
+    residencias.js       crear residencias, unirse por código, catálogo de merchandising
 ```
 
 ## Decisiones de diseño que conviene conocer
@@ -440,11 +464,12 @@ backend/
 
 ## Próximos pasos naturales
 
-- **Merchandising por residencia** — pendiente de decidir el alcance (¿solo
-  catálogo para ver, o ya se puede comprar con Redsys como las entradas?)
-  antes de construirlo. La tabla `residencias` ya existe y está lista
-  para colgar de ahí un catálogo de productos cuando se decida.
-
+- **Poder comprar el merchandising** — de momento el catálogo es solo para
+  ver. El paso natural es reutilizar el mismo flujo de pago con Redsys que
+  ya tienen las entradas (`payment_orders` podría ampliarse para admitir
+  pedidos de merchandising, no solo de entradas, o crear una tabla
+  paralela `merchandise_orders` con el mismo patrón de pedido pendiente →
+  webhook → confirmado).
 - **Reservar el aforo al iniciar el pago, no solo comprobarlo.** Ahora
   mismo, entre que alguien empieza a pagar y Redsys confirma, ese aforo no
   está "apartado" — si dos personas casi a la vez agotan las últimas
