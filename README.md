@@ -265,6 +265,33 @@ probado), y cuando confirmes que va bien, te da las de producción.
   para gestionar un reembolso a mano — es un caso raro, pero puede pasar
   sin una reserva temporal de aforo (mejora anotada más abajo).
 
+## Puntos de fidelidad
+
+Se ganan puntos comprando entradas de verdad, y se pueden canjear por
+descuento en la compra de otras entradas.
+
+- **Tarifas por defecto** (fáciles de cambiar en `loyalty.js` si algún día
+  quieres otras): 1 punto por cada 1€ pagado de verdad; 100 puntos = 1€
+  de descuento.
+- **El saldo no se guarda como un número suelto** — cada movimiento
+  (ganado o canjeado) queda en `loyalty_transactions`, y el saldo se
+  calcula sumando, igual que ya hacíamos con "entradas vendidas". Así
+  nunca puede desincronizarse, y queda un historial de por qué se ganó o
+  gastó cada punto.
+- **Se ganan sobre lo pagado de verdad**, después de aplicar cualquier
+  descuento — no sobre el precio original. Y solo cuando el pago se
+  confirma (nunca antes, para no dar puntos por un pago que luego falla).
+- **Si el descuento con puntos cubre el precio entero**, la compra se
+  confirma al momento (`POST /api/events/:id/pay` devuelve `paid: true`
+  con las entradas ya creadas) — no tendría sentido mandar un cobro de 0€
+  a Redsys. En ese caso los puntos se descuentan igual, y no se ganan
+  puntos nuevos (0€ pagados de verdad = 0 puntos).
+- **El merchandising todavía no da ni gasta puntos** — no se puede
+  comprar todavía (ver la sección de merchandising más abajo), así que no
+  hay ningún pago real del que generar puntos. `loyalty_transactions` ya
+  tiene un campo `reason` genérico, listo para añadir
+  `'merchandise_purchase'` el día que eso se construya.
+
 ## Email de la entrada al comprar
 
 Cuando alguien compra, recibe un email con "¡Esta es tu entrada!" y un
@@ -313,7 +340,8 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
 | POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64) |
 | POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
-| POST   | `/api/events/:id/pay`       |  ✓  | Inicia un pago DE VERDAD con Redsys. Body: `{ quantity }` → devuelve `{ orderCode, paymentUrl }` |
+| POST   | `/api/events/:id/pay`       |  ✓  | Inicia un pago con Redsys. Body: `{ quantity, points_to_redeem }` → `{ orderCode, paid, paymentUrl? , tickets? }`. Si los puntos cubren el total, `paid:true` y llegan las entradas ya creadas, sin pasar por el banco |
+| GET    | `/api/me/points`            |  ✓  | Saldo de puntos de fidelidad y las tarifas vigentes |
 | POST   | `/api/payments/notify`      |  —  | Webhook de Redsys (servidor a servidor) — no lo llama nadie a mano |
 | GET    | `/api/payments/:orderCode/status` |  ✓  | Estado de un pedido de pago: `pending` / `paid` / `failed` |
 | PATCH  | `/api/events/:id/cancel`    |  ✓  | Cancela tu fiesta (conserva las entradas ya vendidas) |
@@ -361,6 +389,7 @@ backend/
   db.js              conexión PostgreSQL + creación de tablas
   auth.js            hash de contraseñas (scrypt) y JWT
   redsys.js            firma y verificación de pagos con Redsys
+  loyalty.js            saldo, ganar y canjear puntos de fidelidad
   email.js            envío del email de la entrada (Resend)
   dateFormat.js        formatea fechas en español, compartido por email y la vista de entrada
   seed.js            datos de ejemplo (npm run seed)
@@ -478,7 +507,8 @@ backend/
   ya tienen las entradas (`payment_orders` podría ampliarse para admitir
   pedidos de merchandising, no solo de entradas, o crear una tabla
   paralela `merchandise_orders` con el mismo patrón de pedido pendiente →
-  webhook → confirmado).
+  webhook → confirmado) — y en ese mismo momento conectarlo con los
+  puntos de fidelidad, que ya están preparados para admitirlo.
 - **Reservar el aforo al iniciar el pago, no solo comprobarlo.** Ahora
   mismo, entre que alguien empieza a pagar y Redsys confirma, ese aforo no
   está "apartado" — si dos personas casi a la vez agotan las últimas

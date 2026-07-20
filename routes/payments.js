@@ -2,9 +2,7 @@ import { Router } from "express";
 import { pool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { buildPaymentForm, verifyNotification, isApproved } from "../redsys.js";
-import { genCode, ticketStatsFor } from "./events.js";
-import { sendTicketEmail } from "../email.js";
-import { formatDateLabel } from "../dateFormat.js";
+import { confirmPaidOrder } from "./events.js";
 
 export const paymentsRouter = Router();
 
@@ -77,7 +75,7 @@ paymentsRouter.post("/notify", async (req, res) => {
     }
 
     const orderCode = params.Ds_Order;
-    const { rows } = await pool.query("SELECT * FROM payment_orders WHERE order_code = $1", [orderCode]);
+    const { rows } = await pool.query("SELECT id, status FROM payment_orders WHERE order_code = $1", [orderCode]);
     const order = rows[0];
     if (!order) {
       console.error("[redsys] Notificación de un pedido que no existe:", orderCode);
@@ -98,56 +96,19 @@ paymentsRouter.post("/notify", async (req, res) => {
       return res.send("OK");
     }
 
-    // Vuelve a comprobar el aforo AHORA — puede haber pasado tiempo desde
-    // que se inició el pago y otra persona podría haber agotado las
-    // entradas mientras tanto.
-    const eventResult = await pool.query("SELECT * FROM events WHERE id = $1", [order.event_id]);
-    const event = eventResult.rows[0];
-    const { sold } = await ticketStatsFor(event.id);
-    const available = event.capacity - sold;
+    // Guardamos la respuesta de Redsys antes de confirmar, para que quede
+    // registrada aunque algo falle a partir de aquí (p. ej. sin aforo).
+    await pool.query("UPDATE payment_orders SET redsys_response = $1 WHERE id = $2", [params.Ds_Response, order.id]);
 
-    if (order.quantity > available) {
-      // Caso raro (pago aprobado pero ya no queda aforo): lo dejamos
-      // registrado como fallido de cara al aforo, pero el dinero ya se ha
-      // cobrado — un caso así necesitaría un reembolso manual. Se anota
-      // como mejora futura en el README (reservar aforo al iniciar el
-      // pago, no solo comprobarlo).
-      await pool.query("UPDATE payment_orders SET status = 'failed', redsys_response = $1 WHERE id = $2", [
-        "sin_aforo_al_confirmar",
-        order.id,
-      ]);
-      console.error(`[redsys] Pedido ${orderCode} pagado pero sin aforo disponible — requiere reembolso manual.`);
-      return res.send("OK");
+    try {
+      await confirmPaidOrder(orderCode);
+    } catch (err) {
+      // confirmPaidOrder ya deja el pedido en 'failed' si el motivo es
+      // falta de aforo — solo registramos el error, la respuesta a Redsys
+      // sigue siendo "OK" (la notificación en sí se procesó bien, el
+      // problema es nuestro, no de Redsys).
+      console.error(`[redsys] No se pudo confirmar el pedido ${orderCode}:`, err.message);
     }
-
-    const tickets = [];
-    for (let i = 0; i < order.quantity; i++) {
-      let code = genCode();
-      while ((await pool.query("SELECT id FROM tickets WHERE code = $1", [code])).rows.length > 0) {
-        code = genCode();
-      }
-      const unitPrice = Math.round(order.amount_cents / order.quantity);
-      const ticketResult = await pool.query(
-        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id)
-         VALUES ($1, $2, 1, $3, $3, $4, $5)
-         RETURNING *`,
-        [event.id, order.buyer_id, unitPrice, code, order.order_code]
-      );
-      tickets.push(ticketResult.rows[0]);
-    }
-
-    await pool.query(
-      "UPDATE payment_orders SET status = 'paid', redsys_response = $1, paid_at = now() WHERE id = $2",
-      [params.Ds_Response, order.id]
-    );
-
-    const buyer = await pool.query("SELECT email, name FROM users WHERE id = $1", [order.buyer_id]);
-    sendTicketEmail({
-      to: buyer.rows[0].email,
-      buyerName: buyer.rows[0].name,
-      tickets,
-      event: { ...event, dateLabel: formatDateLabel(event.event_date, event.event_time) },
-    }).catch((err) => console.error("[email] Error inesperado enviando la entrada:", err.message));
 
     res.send("OK");
   } catch (err) {
@@ -174,7 +135,12 @@ paymentsRouter.get("/:orderCode/status", requireAuth, async (req, res, next) => 
       tickets = ticketRows.rows;
     }
 
-    res.json({ status: order.status, tickets });
+    res.json({
+      status: order.status,
+      tickets,
+      discountCents: order.discount_cents,
+      pointsRedeemed: order.points_redeemed,
+    });
   } catch (err) {
     next(err);
   }

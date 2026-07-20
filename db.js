@@ -120,10 +120,27 @@ export async function initDb() {
       buyer_id INTEGER NOT NULL REFERENCES users(id),
       quantity INTEGER NOT NULL CHECK (quantity > 0),
       amount_cents INTEGER NOT NULL,
+      points_redeemed INTEGER NOT NULL DEFAULT 0,
+      discount_cents INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','failed')),
       redsys_response TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       paid_at TIMESTAMPTZ
+    );
+
+    -- Historial de puntos de fidelidad — en vez de guardar "el saldo" como
+    -- un número suelto, cada movimiento queda registrado (positivo =
+    -- ganados, negativo = canjeados) y el saldo se calcula sumando. Así
+    -- nunca se puede desincronizar, y queda un historial de por qué se
+    -- ganó o gastó cada punto — mismo enfoque que ya usamos para
+    -- "entradas vendidas" en events.
+    CREATE TABLE IF NOT EXISTS loyalty_transactions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      points INTEGER NOT NULL,
+      reason TEXT NOT NULL, -- 'ticket_purchase' | 'ticket_redemption'
+      order_code TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     -- Catálogo de merchandising por residencia — de momento solo para
@@ -165,6 +182,8 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
+    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS points_redeemed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS discount_cents INTEGER NOT NULL DEFAULT 0;
 
     -- A qué residencia pertenece este usuario (NULL = a ninguna) — se
     -- rellena al introducir el código de una residencia en la app.
@@ -187,6 +206,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_tickets_buyer ON tickets(buyer_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_order ON tickets(order_id);
     CREATE INDEX IF NOT EXISTS idx_payment_orders_buyer ON payment_orders(buyer_id);
+    CREATE INDEX IF NOT EXISTS idx_loyalty_user ON loyalty_transactions(user_id);
     CREATE INDEX IF NOT EXISTS idx_users_residencia ON users(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_events_residencia ON events(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_merchandise_residencia ON merchandise(residencia_id);

@@ -5,6 +5,13 @@ import { requireAuth, requireRole, optionalAuth } from "../middleware/requireAut
 import { sendTicketEmail } from "../email.js";
 import { formatDateLabel } from "../dateFormat.js";
 import { generateOrderCode } from "../redsys.js";
+import {
+  getPointsBalance,
+  discountForPoints,
+  recordPointsEarned,
+  recordPointsRedeemed,
+  POINTS_PER_EURO_DISCOUNT,
+} from "../loyalty.js";
 
 export const eventsRouter = Router();
 
@@ -43,6 +50,80 @@ export function genCode() {
   let s = "";
   for (let i = 0; i < 8; i++) s += chars[crypto.randomInt(chars.length)];
   return s.slice(0, 4) + "-" + s.slice(4);
+}
+
+// Confirma un pedido de pago 'pending' como pagado: crea las entradas (una
+// fila por cada una, con su propio código), mueve los puntos de fidelidad
+// (se canjean los usados, se ganan por lo pagado de verdad) y manda el
+// email. La usan tanto el webhook de Redsys (routes/payments.js) como el
+// caso especial de "el descuento cubre el total entero" en /:id/pay de
+// aquí mismo — así solo hay un sitio con esta lógica, no dos copias que
+// puedan desincronizarse.
+export async function confirmPaidOrder(orderCode) {
+  const orderResult = await pool.query("SELECT * FROM payment_orders WHERE order_code = $1", [orderCode]);
+  const order = orderResult.rows[0];
+  if (!order) {
+    throw new Error("Pedido no encontrado.");
+  }
+
+  // Idempotencia: si ya se procesó (p. ej. Redsys reintentando la misma
+  // notificación), no lo repetimos — devolvemos lo que ya existe.
+  if (order.status === "paid") {
+    const existingTickets = await pool.query("SELECT * FROM tickets WHERE order_id = $1", [orderCode]);
+    return { order, tickets: existingTickets.rows };
+  }
+  if (order.status !== "pending") {
+    return { order, tickets: [] };
+  }
+
+  const eventResult = await pool.query("SELECT * FROM events WHERE id = $1", [order.event_id]);
+  const event = eventResult.rows[0];
+
+  // Vuelve a comprobar el aforo AHORA — puede haber pasado tiempo desde
+  // que se inició el pago y alguien más podría haber agotado las entradas
+  // mientras tanto.
+  const { sold } = await ticketStatsFor(event.id);
+  const available = event.capacity - sold;
+  if (order.quantity > available) {
+    await pool.query("UPDATE payment_orders SET status = 'failed', redsys_response = $1 WHERE id = $2", [
+      "sin_aforo_al_confirmar",
+      order.id,
+    ]);
+    throw new Error("Ya no queda aforo disponible para este pedido.");
+  }
+
+  const tickets = [];
+  for (let i = 0; i < order.quantity; i++) {
+    let code = genCode();
+    while ((await pool.query("SELECT id FROM tickets WHERE code = $1", [code])).rows.length > 0) {
+      code = genCode();
+    }
+    const unitPrice = Math.round(order.amount_cents / order.quantity);
+    const ticketResult = await pool.query(
+      `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id)
+       VALUES ($1, $2, 1, $3, $3, $4, $5)
+       RETURNING *`,
+      [event.id, order.buyer_id, unitPrice, code, order.order_code]
+    );
+    tickets.push(ticketResult.rows[0]);
+  }
+
+  await pool.query("UPDATE payment_orders SET status = 'paid', paid_at = now() WHERE id = $1", [order.id]);
+
+  if (order.points_redeemed > 0) {
+    await recordPointsRedeemed(order.buyer_id, order.points_redeemed, order.order_code);
+  }
+  await recordPointsEarned(order.buyer_id, order.amount_cents, order.order_code);
+
+  const buyer = await pool.query("SELECT email, name FROM users WHERE id = $1", [order.buyer_id]);
+  sendTicketEmail({
+    to: buyer.rows[0].email,
+    buyerName: buyer.rows[0].name,
+    tickets,
+    event: { ...event, dateLabel: formatDateLabel(event.event_date, event.event_time) },
+  }).catch((err) => console.error("[email] Error inesperado enviando la entrada:", err.message));
+
+  return { order, tickets };
 }
 
 // GET /api/events?category=Graduaciones&q=oviedo
@@ -266,6 +347,11 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
 // devuelve la URL que la app debe abrir en el navegador del móvil para
 // que la persona pague en la página del banco. Las entradas se crean más
 // tarde, cuando llega la confirmación de Redsys en POST /api/payments/notify.
+//
+// Admite canjear puntos de fidelidad para descontar del precio
+// (points_to_redeem). Si el descuento cubre el total entero, no hace
+// falta pasar por Redsys — se confirma al momento, como una compra
+// gratuita de verdad (no tendría sentido mandar un cobro de 0€ al banco).
 eventsRouter.post(
   "/:id/pay",
   requireAuth,
@@ -290,6 +376,28 @@ eventsRouter.post(
         return res.status(409).json({ error: `Solo quedan ${available} entradas disponibles.` });
       }
 
+      const rawFullAmount = event.price_cents * quantity;
+      // No tiene sentido canjear más puntos de los que hacen falta para
+      // cubrir el precio entero (redondeado a euros, que es como se
+      // descuenta) — así "pointsUsed" siempre corresponde exactamente al
+      // descuento aplicado, sin casos raros de redondeo.
+      const maxAffordablePoints = Math.floor(rawFullAmount / 100) * POINTS_PER_EURO_DISCOUNT;
+
+      const pointsRequested = Number(req.body?.points_to_redeem) || 0;
+      let pointsUsed = 0;
+      let discountCents = 0;
+      if (pointsRequested > 0) {
+        const balance = await getPointsBalance(req.user.id);
+        if (pointsRequested > balance) {
+          return res.status(400).json({ error: `No tienes suficientes puntos (tienes ${balance}).` });
+        }
+        const discount = discountForPoints(Math.min(pointsRequested, balance, maxAffordablePoints));
+        pointsUsed = discount.pointsUsed;
+        discountCents = discount.discountCents;
+      }
+
+      const amountCents = rawFullAmount - discountCents;
+
       let orderCode = generateOrderCode();
       while (
         (await pool.query("SELECT id FROM payment_orders WHERE order_code = $1", [orderCode])).rows.length > 0
@@ -297,16 +405,23 @@ eventsRouter.post(
         orderCode = generateOrderCode();
       }
 
-      const amountCents = event.price_cents * quantity;
       await pool.query(
-        `INSERT INTO payment_orders (order_code, event_id, buyer_id, quantity, amount_cents)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [orderCode, event.id, req.user.id, quantity, amountCents]
+        `INSERT INTO payment_orders (order_code, event_id, buyer_id, quantity, amount_cents, points_redeemed, discount_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [orderCode, event.id, req.user.id, quantity, amountCents, pointsUsed, discountCents]
       );
+
+      // El descuento cubre el total entero: nada que cobrar de verdad, así
+      // que confirmamos al momento en vez de mandar un cobro de 0€ al banco.
+      if (amountCents === 0) {
+        const confirmed = await confirmPaidOrder(orderCode);
+        return res.status(201).json({ orderCode, paid: true, tickets: confirmed.tickets });
+      }
 
       const publicUrl = process.env.PUBLIC_APP_URL || "http://localhost:3001";
       res.status(201).json({
         orderCode,
+        paid: false,
         // La app abre esto en el navegador del móvil, no dentro de la app
         // — Redsys tiene que mostrar la página del banco de verdad.
         paymentUrl: `${publicUrl}/api/payments/${orderCode}/form`,
