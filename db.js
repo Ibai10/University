@@ -141,6 +141,19 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Galería de fotos por residencia — mismo criterio de acceso que el
+    -- merchandising (solo un admin sube/borra, solo quien pertenece a
+    -- esa residencia o un admin las ve), pero sin nombre ni precio, solo
+    -- la imagen y un pie de foto opcional.
+    CREATE TABLE IF NOT EXISTS residencia_photos (
+      id SERIAL PRIMARY KEY,
+      residencia_id INTEGER NOT NULL REFERENCES residencias(id),
+      image_base64 TEXT NOT NULL,
+      caption TEXT NOT NULL DEFAULT '',
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     -- Migraciones para bases de datos que ya existían antes de estos
     -- cambios. Van SIEMPRE antes de los índices/constraints que dependan
     -- de las columnas nuevas — un índice sobre una columna que aún no
@@ -177,5 +190,6 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_residencia ON users(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_events_residencia ON events(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_merchandise_residencia ON merchandise(residencia_id);
+    CREATE INDEX IF NOT EXISTS idx_residencia_photos_residencia ON residencia_photos(residencia_id);
   `);
 }

@@ -170,6 +170,12 @@ que se hayan marcado como exclusivas de esa residencia — nadie más las ve.
   pertenezca a esa residencia (o un admin) puede verlo
   (`GET /api/residencias/:id/merchandise`) — mismo criterio de
   visibilidad que las fiestas exclusivas.
+- **Cada residencia tiene también su propia galería de fotos**, con el
+  mismo criterio de acceso — solo admin sube o borra fotos
+  (`POST`/`DELETE /api/residencias/:id/photos`), solo quien pertenezca a
+  la residencia (o un admin) las ve (`GET /api/residencias/:id/photos`).
+  A diferencia del merchandising, no tiene nombre ni precio — solo la
+  imagen y un pie de foto opcional (`caption`).
 
 **Dos fallos reales que se corrigieron construyendo esto, por si te
 resulta útil el porqué**:
@@ -327,6 +333,9 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/residencias/:id/merchandise` |  ✓  | Catálogo de una residencia — solo lo ve quien pertenezca a ella (o admin) |
 | POST   | `/api/residencias/:id/merchandise` |  ✓  | Añade un producto al catálogo. Body: `{ name, description, price, image }` — solo admin |
 | DELETE | `/api/residencias/:id/merchandise/:itemId` |  ✓  | Borra un producto del catálogo — solo admin |
+| GET    | `/api/residencias/:id/photos` |  ✓  | Galería de fotos de una residencia — mismo criterio de acceso que el merchandising |
+| POST   | `/api/residencias/:id/photos` |  ✓  | Sube una foto. Body: `{ image, caption }` — solo admin |
+| DELETE | `/api/residencias/:id/photos/:photoId` |  ✓  | Borra una foto de la galería — solo admin |
 
 ### Ejemplo rápido con curl
 
@@ -366,7 +375,7 @@ backend/
     venues.js          listar y añadir discotecas/salas
     admin.js           buscar usuarios y cambiar su rol (solo admin)
     payments.js         formulario de pago, webhook de Redsys, estado del pedido
-    residencias.js       crear residencias, unirse por código, catálogo de merchandising
+    residencias.js       crear residencias, unirse por código, catálogo de merchandising y galería de fotos
 ```
 
 ## Decisiones de diseño que conviene conocer

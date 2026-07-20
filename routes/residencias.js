@@ -161,3 +161,71 @@ residenciasRouter.delete("/:id/merchandise/:itemId", requireAuth, requireRole("a
     next(err);
   }
 });
+
+const MAX_PHOTO_LENGTH = 4 * 1024 * 1024;
+
+// GET /api/residencias/:id/photos
+// La galería de una residencia — mismo criterio de acceso que el
+// merchandising: solo la ve quien pertenezca a ella (o un admin).
+residenciasRouter.get("/:id/photos", requireAuth, async (req, res, next) => {
+  try {
+    const residenciaId = Number(req.params.id);
+    const belongs = req.user.residenciaId === residenciaId;
+    if (!belongs && req.user.role !== "admin") {
+      return res.status(404).json({ error: "Residencia no encontrada." });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT * FROM residencia_photos WHERE residencia_id = $1 ORDER BY created_at DESC",
+      [residenciaId]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/residencias/:id/photos
+// Sube una foto a la galería — solo admin. Body: { image, caption }.
+residenciasRouter.post("/:id/photos", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const residenciaId = Number(req.params.id);
+    const residenciaCheck = await pool.query("SELECT id FROM residencias WHERE id = $1", [residenciaId]);
+    if (!residenciaCheck.rows[0]) {
+      return res.status(404).json({ error: "Residencia no encontrada." });
+    }
+
+    const { image, caption } = req.body || {};
+    if (!image || typeof image !== "string") {
+      return res.status(400).json({ error: "La foto es obligatoria." });
+    }
+    if (image.length > MAX_PHOTO_LENGTH) {
+      return res.status(400).json({ error: "La imagen es demasiado grande." });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO residencia_photos (residencia_id, image_base64, caption, created_by)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [residenciaId, image, (caption || "").trim(), req.user.id]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/residencias/:id/photos/:photoId
+// Quita una foto de la galería — solo admin.
+residenciasRouter.delete("/:id/photos/:photoId", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "DELETE FROM residencia_photos WHERE id = $1 AND residencia_id = $2 RETURNING id",
+      [req.params.photoId, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Foto no encontrada." });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
