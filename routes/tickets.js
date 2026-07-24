@@ -9,11 +9,10 @@ export const ticketVerifyRouter = Router();
 // POST /api/tickets/:code/checkin
 // Valida una entrada por su código (el que lleva el QR) y la marca como
 // usada. Puede hacerlo: un organizador de la MISMA discoteca a la que
-// pertenece esa fiesta (no hace falta que él mismo la creara), cualquier
-// 'validador' (pensado para personal de puerta que no organiza nada, y
-// que por ahora puede validar en cualquier fiesta — repartir validadores
-// por fiesta concreta queda anotado como mejora futura en el README), o
-// un 'admin'.
+// pertenece esa fiesta (no hace falta que él mismo la creara), un
+// 'validador' que haya sido añadido explícitamente a esa discoteca (ver
+// venue_validators — ya no vale para cualquier fiesta, tiene que
+// haberlo elegido el organizador o un admin), o un 'admin'.
 ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador", "validador", "admin"), async (req, res, next) => {
   try {
     const code = req.params.code.trim().toUpperCase();
@@ -32,10 +31,20 @@ ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador"
       return res.status(404).json({ error: "Esa entrada no existe. Revisa el código." });
     }
 
-    let canValidateThis = req.user.role === "admin" || req.user.role === "validador";
+    let canValidateThis = req.user.role === "admin";
     if (!canValidateThis && req.user.role === "organizador" && req.user.organizerVenueId) {
       const venueResult = await pool.query("SELECT name FROM venues WHERE id = $1", [req.user.organizerVenueId]);
       canValidateThis = venueResult.rows[0]?.name === ticket.category;
+    }
+    if (!canValidateThis && req.user.role === "validador") {
+      const assignment = await pool.query(
+        `SELECT 1
+         FROM venue_validators
+         JOIN venues ON venues.id = venue_validators.venue_id
+         WHERE venue_validators.validator_id = $1 AND venues.name = $2`,
+        [req.user.id, ticket.category]
+      );
+      canValidateThis = assignment.rows.length > 0;
     }
     if (!canValidateThis) {
       return res.status(403).json({ error: "Esta entrada no pertenece a ninguna de tus fiestas." });

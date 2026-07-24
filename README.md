@@ -117,7 +117,7 @@ Cuatro roles, guardados en `users.role`:
 |-----|-------|
 | `comprador` (por defecto) | Navegar y comprar entradas |
 | `organizador` | Todo lo del comprador + publicar/cancelar/borrar/validar fiestas — pero solo de la discoteca a la que un admin le haya asignado (ver sección más abajo) |
-| `validador` | Validar entradas de **cualquier** fiesta. No puede comprar entradas ni organizar — su cuenta existe solo para hacer de puerta |
+| `validador` | Validar entradas — pero solo de las discotecas donde un organizador o admin lo haya añadido explícitamente (ver "Organizadores asignados a una discoteca"). No puede comprar entradas ni organizar |
 | `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
 
 Nadie puede auto-asignarse `organizador`, `validador` ni `admin` al
@@ -162,6 +162,25 @@ no lo del resto.
   acceso a todo lo demás desde otros sitios).
 - Un admin sigue pudiendo gestionar cualquier fiesta de cualquier
   discoteca, como siempre.
+
+### Validadores asignados a una discoteca
+
+De la misma forma, un `validador` ya no puede validar entradas de
+cualquier fiesta — solo de las discotecas donde un organizador (el de esa
+discoteca) o un admin lo haya añadido explícitamente.
+
+- **El organizador de una discoteca busca validadores por nombre**
+  (`GET /api/venues/:id/validators/search?q=`) entre todas las cuentas
+  con rol `validador`, y los añade o quita de su discoteca — solo de la
+  suya, no puede tocar la lista de otra (`GET`/`POST`/`DELETE
+  /api/venues/:id/validators`).
+- **Un admin puede hacer lo mismo para cualquier discoteca**, no solo la
+  suya (si es que tuviera una asignada).
+- **Un mismo validador puede estar añadido a varias discotecas** — por
+  ejemplo, alguien que hace de puerta en más de un sitio.
+- El organizador de esa discoteca sigue pudiendo validar sus propias
+  entradas siempre, sin necesidad de añadirse a sí mismo a ninguna lista
+  — esta lista es específicamente para el rol `validador`.
 
 ## Residencias de estudiantes
 
@@ -378,6 +397,10 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
 | POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` — requiere rol organizador o admin |
+| GET    | `/api/venues/:id/validators` |  ✓  | Quién puede validar entradas de esta discoteca — organizador (solo la suya) o admin |
+| GET    | `/api/venues/:id/validators/search?q=` |  ✓  | Busca entre todas las cuentas con rol validador, por nombre/nickname/email |
+| POST   | `/api/venues/:id/validators` |  ✓  | Añade un validador a la discoteca. Body: `{ validator_id }` |
+| DELETE | `/api/venues/:id/validators/:validatorId` |  ✓  | Quita a un validador de la discoteca |
 | GET    | `/api/admin/users`          |  ✓  | Busca usuarios por email/nickname/nombre (`?q=`) — solo admin |
 | PATCH  | `/api/admin/users/:id/role` |  ✓  | Cambia el rol de un usuario. Body: `{ role }` — solo admin |
 | GET    | `/api/admin/organizadores`  |  ✓  | Lista todas las cuentas con rol organizador, con su discoteca asignada — solo admin |
@@ -544,12 +567,6 @@ backend/
   detecta y no se crea la entrada, pero ya se ha cobrado — necesitaría un
   reembolso manual). El paso natural es un estado "reservado" con
   caducidad de unos minutos mientras dura el pago.
-- **Los `validador` pueden validar entradas de cualquier fiesta, no solo
-  de una en concreto.** Es la simplificación de partida: no existe (todavía)
-  una relación de "este validador trabaja para este organizador/esta
-  fiesta". Si hiciera falta restringirlo, el paso natural es una tabla
-  `event_validators (event_id, user_id)` y comprobar esa asignación en
-  `POST /api/tickets/:code/checkin` en vez de aceptar el rol sin más.
 - Verificar un dominio propio en Resend para que los emails no salgan
   desde `onboarding@resend.dev`, y añadir un reenvío manual ("¿no te llegó
   el email? reenviar") desde la propia app.

@@ -56,6 +56,20 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Qué validadores puede validar entradas de qué discoteca. Antes un
+    -- 'validador' podía validar CUALQUIER fiesta — ahora solo las de las
+    -- discotecas donde el organizador (o un admin) lo haya añadido aquí
+    -- explícitamente. Un mismo validador puede estar en varias discotecas
+    -- (por ejemplo, alguien que hace de puerta en más de un sitio).
+    CREATE TABLE IF NOT EXISTS venue_validators (
+      id SERIAL PRIMARY KEY,
+      venue_id INTEGER NOT NULL REFERENCES venues(id),
+      validator_id INTEGER NOT NULL REFERENCES users(id),
+      assigned_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(venue_id, validator_id)
+    );
+
     -- Una residencia de estudiantes. Solo un admin puede crear una (botón
     -- en el panel de administración) — al crearla se genera un código
     -- único que se le da a los residentes; quien lo introduce en la app
@@ -218,5 +232,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_merchandise_residencia ON merchandise(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_residencia_photos_residencia ON residencia_photos(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_users_organizer_venue ON users(organizer_venue_id);
+    CREATE INDEX IF NOT EXISTS idx_venue_validators_venue ON venue_validators(venue_id);
+    CREATE INDEX IF NOT EXISTS idx_venue_validators_validator ON venue_validators(validator_id);
   `);
 }
