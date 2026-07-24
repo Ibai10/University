@@ -39,6 +39,12 @@ async function getResidenciaInfo(residenciaId) {
   return rows[0] ? { id: rows[0].id, name: rows[0].name } : null;
 }
 
+async function getOrganizerVenueInfo(venueId) {
+  if (!venueId) return null;
+  const { rows } = await pool.query("SELECT id, name FROM venues WHERE id = $1", [venueId]);
+  return rows[0] ? { id: rows[0].id, name: rows[0].name } : null;
+}
+
 // POST /api/auth/register
 authRouter.post("/register", async (req, res, next) => {
   try {
@@ -79,7 +85,7 @@ authRouter.post("/register", async (req, res, next) => {
 
     const role = await ensureAdminBootstrap(insert.rows[0].id, normalizedEmail, insert.rows[0].role);
 
-    const user = { id: insert.rows[0].id, email: normalizedEmail, name, nickname: trimmedNickname, role, residencia: null };
+    const user = { id: insert.rows[0].id, email: normalizedEmail, name, nickname: trimmedNickname, role, residencia: null, organizerVenue: null };
     const token = signToken(user);
     res.status(201).json({ token, user });
   } catch (err) {
@@ -105,8 +111,9 @@ authRouter.post("/login", async (req, res, next) => {
 
     const role = await ensureAdminBootstrap(row.id, normalizedEmail, row.role);
     const residencia = await getResidenciaInfo(row.residencia_id);
+    const organizerVenue = await getOrganizerVenueInfo(row.organizer_venue_id);
 
-    const user = { id: row.id, email: row.email, name: row.name, nickname: row.nickname, role, residencia };
+    const user = { id: row.id, email: row.email, name: row.name, nickname: row.nickname, role, residencia, organizerVenue };
     const token = signToken(user);
     res.json({ token, user });
   } catch (err) {
@@ -197,7 +204,16 @@ authRouter.post("/reset-password", async (req, res, next) => {
     // Te dejamos ya con sesión iniciada, para no obligarte a hacer login
     // aparte justo después de cambiar la contraseña.
     const residencia = await getResidenciaInfo(user.residencia_id);
-    const authUser = { id: user.id, email: user.email, name: user.name, nickname: user.nickname, role: user.role, residencia };
+    const organizerVenue = await getOrganizerVenueInfo(user.organizer_venue_id);
+    const authUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      nickname: user.nickname,
+      role: user.role,
+      residencia,
+      organizerVenue,
+    };
     const token = signToken(authUser);
     res.json({ token, user: authUser });
   } catch (err) {

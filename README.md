@@ -116,7 +116,7 @@ Cuatro roles, guardados en `users.role`:
 | Rol | Puede |
 |-----|-------|
 | `comprador` (por defecto) | Navegar y comprar entradas |
-| `organizador` | Todo lo del comprador + publicar/cancelar/borrar sus fiestas + añadir discotecas + validar entradas de sus propias fiestas |
+| `organizador` | Todo lo del comprador + publicar/cancelar/borrar/validar fiestas — pero solo de la discoteca a la que un admin le haya asignado (ver sección más abajo) |
 | `validador` | Validar entradas de **cualquier** fiesta. No puede comprar entradas ni organizar — su cuenta existe solo para hacer de puerta |
 | `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
 
@@ -136,6 +136,32 @@ para buscar a cualquier otro usuario y cambiarle el rol.
 datos, no el token — si un admin te asciende a `organizador`, puedes
 publicar fiestas al momento, sin tener que cerrar sesión y volver a
 entrar.
+
+## Organizadores asignados a una discoteca
+
+Un organizador ya no puede publicar para cualquier discoteca — solo para
+la que un admin le haya asignado, y solo ve/gestiona lo de esa discoteca,
+no lo del resto.
+
+- **Solo un admin asigna la discoteca** de un organizador, desde el panel
+  de administración (`GET`/`PATCH /api/admin/organizadores`) — un
+  organizador nunca puede asignársela a sí mismo ni cambiarla.
+- **Mientras no tenga ninguna asignada, no puede publicar fiestas** —
+  `POST /api/events` responde con un 403 y un mensaje claro pidiendo que
+  un admin le asigne una.
+- **La discoteca se fuerza en el servidor**, no solo se oculta en la
+  app — aunque alguien manipulara la petición para pedir otra discoteca
+  distinta, el backend ignora eso y usa siempre la discoteca asignada de
+  verdad.
+- **"Mis fiestas" ya no es "lo que yo he publicado"** — es "lo de mi
+  discoteca". Si dos organizadores están asignados a la misma discoteca
+  (por ejemplo, dos personas del mismo local), cualquiera de los dos ve,
+  cancela, borra y valida las entradas de las fiestas de esa discoteca,
+  las haya publicado quien las haya publicado. Un admin, en cambio, sigue
+  viendo aquí solo las que ha publicado él mismo (para eso ya tiene
+  acceso a todo lo demás desde otros sitios).
+- Un admin sigue pudiendo gestionar cualquier fiesta de cualquier
+  discoteca, como siempre.
 
 ## Residencias de estudiantes
 
@@ -354,6 +380,8 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` — requiere rol organizador o admin |
 | GET    | `/api/admin/users`          |  ✓  | Busca usuarios por email/nickname/nombre (`?q=`) — solo admin |
 | PATCH  | `/api/admin/users/:id/role` |  ✓  | Cambia el rol de un usuario. Body: `{ role }` — solo admin |
+| GET    | `/api/admin/organizadores`  |  ✓  | Lista todas las cuentas con rol organizador, con su discoteca asignada — solo admin |
+| PATCH  | `/api/admin/organizadores/:id/venue` |  ✓  | Asigna (o quita, con `venue_id: null`) la discoteca de un organizador — solo admin |
 | GET    | `/api/residencias`          |  ✓  | Lista las residencias con su código — solo admin |
 | POST   | `/api/residencias`          |  ✓  | Crea una residencia y le genera un código único. Body: `{ name }` — solo admin |
 | POST   | `/api/residencias/join`     |  ✓  | Te une a una residencia por su código. Body: `{ code }` |

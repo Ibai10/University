@@ -190,6 +190,12 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
     ALTER TABLE events ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
 
+    -- A qué discoteca está asignado un organizador (NULL = a ninguna
+    -- todavía). Solo lo rellena un admin, desde el panel de
+    -- administración — un organizador no puede asignarse una a sí mismo.
+    -- Mientras no tenga ninguna, no puede publicar fiestas.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS organizer_venue_id INTEGER REFERENCES venues(id);
+
     -- "category" ya no está limitado a 3 valores fijos (ahora son nombres
     -- de discotecas, con lista abierta) — si la restricción antigua
     -- existe todavía en una base de datos previa, se quita.
@@ -211,5 +217,6 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_events_residencia ON events(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_merchandise_residencia ON merchandise(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_residencia_photos_residencia ON residencia_photos(residencia_id);
+    CREATE INDEX IF NOT EXISTS idx_users_organizer_venue ON users(organizer_venue_id);
   `);
 }

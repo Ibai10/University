@@ -175,16 +175,43 @@ eventsRouter.get("/", optionalAuth, async (req, res, next) => {
 // GET /api/events/mine
 // Fiestas publicadas por el organizador autenticado, con ventas e ingresos.
 // Va ANTES de /:id para que "mine" no se interprete como un id.
+// GET /api/events/mine
+// Para un organizador, esto ya NO es "las fiestas que yo he creado" — es
+// "las fiestas de la discoteca a la que estoy asignado", las haya creado
+// quien las haya creado. Es justo lo que separa "ver lo mío" de "ver lo
+// de mi discoteca". Un admin sigue viendo aquí las que ha creado él
+// mismo (para eso ya tiene acceso a todo lo demás desde otros sitios).
 eventsRouter.get("/mine", requireAuth, async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT events.*, residencias.name AS residencia_name
-       FROM events
-       LEFT JOIN residencias ON residencias.id = events.residencia_id
-       WHERE events.organizer_id = $1
-       ORDER BY events.created_at DESC`,
-      [req.user.id]
-    );
+    let sql;
+    let params;
+
+    if (req.user.role === "organizador") {
+      if (!req.user.organizerVenueId) {
+        // Sin discoteca asignada todavía — no tiene "sus fiestas" hasta
+        // que un admin le asigne una.
+        return res.json([]);
+      }
+      const venueResult = await pool.query("SELECT name FROM venues WHERE id = $1", [req.user.organizerVenueId]);
+      const venueName = venueResult.rows[0]?.name;
+      if (!venueName) return res.json([]);
+
+      sql = `SELECT events.*, residencias.name AS residencia_name
+             FROM events
+             LEFT JOIN residencias ON residencias.id = events.residencia_id
+             WHERE events.category = $1
+             ORDER BY events.created_at DESC`;
+      params = [venueName];
+    } else {
+      sql = `SELECT events.*, residencias.name AS residencia_name
+             FROM events
+             LEFT JOIN residencias ON residencias.id = events.residencia_id
+             WHERE events.organizer_id = $1
+             ORDER BY events.created_at DESC`;
+      params = [req.user.id];
+    }
+
+    const { rows } = await pool.query(sql, params);
     const withStats = await Promise.all(rows.map(withAvailability));
     res.json(withStats);
   } catch (err) {
@@ -220,10 +247,28 @@ eventsRouter.get("/:id", optionalAuth, async (req, res, next) => {
 // POST /api/events
 // Crea una fiesta. Solo organizador o admin — un comprador normal no
 // puede publicar (esto es justo lo que separa el rol "organizador").
+// Un organizador SOLO puede publicar para SU discoteca asignada — ni
+// siquiera si el body pide otra distinta, aquí se ignora y se fuerza la
+// suya (el selector de la app ya ni se lo deja elegir, pero esto es la
+// comprobación de verdad, por si alguien se salta la app).
 eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
-    const { title, category, description, location, event_date, event_time, price, capacity, image, residencia_id } =
+    const { title, description, location, event_date, event_time, price, capacity, image, residencia_id } =
       req.body || {};
+    let { category } = req.body || {};
+
+    if (req.user.role === "organizador") {
+      if (!req.user.organizerVenueId) {
+        return res.status(403).json({
+          error: "Tu cuenta de organizador no tiene ninguna discoteca asignada todavía. Pide a un admin que te asigne una.",
+        });
+      }
+      const venueResult = await pool.query("SELECT name FROM venues WHERE id = $1", [req.user.organizerVenueId]);
+      if (!venueResult.rows[0]) {
+        return res.status(403).json({ error: "La discoteca asignada a tu cuenta ya no existe. Pide a un admin que te asigne otra." });
+      }
+      category = venueResult.rows[0].name;
+    }
 
     if (!title || !location || !event_date || !event_time) {
       return res.status(400).json({ error: "title, location, event_date y event_time son obligatorios." });
@@ -432,6 +477,19 @@ eventsRouter.post(
   }
 );
 
+// ¿Puede este usuario gestionar (cancelar/borrar) esta fiesta? Un admin,
+// siempre. Un organizador, si la fiesta es de SU discoteca asignada — ya
+// no hace falta que él mismo la creara, cualquier fiesta de su discoteca
+// cuenta como "suya" para gestionarla.
+async function canManageEvent(req, event) {
+  if (req.user.role === "admin") return true;
+  if (req.user.role !== "organizador" || !req.user.organizerVenueId) return false;
+
+  const venueResult = await pool.query("SELECT name FROM venues WHERE id = $1", [req.user.organizerVenueId]);
+  const venueName = venueResult.rows[0]?.name;
+  return !!venueName && venueName === event.category;
+}
+
 // PATCH /api/events/:id/cancel
 // Cancela una fiesta (no la borra): deja de ser comprable y de aparecer en
 // el listado público, pero las entradas ya vendidas y su historial se
@@ -441,8 +499,8 @@ eventsRouter.patch("/:id/cancel", requireAuth, requireRole("organizador", "admin
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
     const event = rows[0];
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
-    if (event.organizer_id !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Esta fiesta no es tuya." });
+    if (!(await canManageEvent(req, event))) {
+      return res.status(403).json({ error: "Esta fiesta no es de tu discoteca." });
     }
     if (event.status === "cancelled") {
       return res.status(409).json({ error: "Esta fiesta ya estaba cancelada." });
@@ -464,8 +522,8 @@ eventsRouter.delete("/:id", requireAuth, requireRole("organizador", "admin"), as
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
     const event = rows[0];
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
-    if (event.organizer_id !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Esta fiesta no es tuya." });
+    if (!(await canManageEvent(req, event))) {
+      return res.status(403).json({ error: "Esta fiesta no es de tu discoteca." });
     }
 
     const { sold } = await ticketStatsFor(event.id);

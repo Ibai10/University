@@ -8,7 +8,8 @@ export const ticketVerifyRouter = Router();
 
 // POST /api/tickets/:code/checkin
 // Valida una entrada por su código (el que lleva el QR) y la marca como
-// usada. Puede hacerlo: el organizador dueño de esa fiesta, cualquier
+// usada. Puede hacerlo: un organizador de la MISMA discoteca a la que
+// pertenece esa fiesta (no hace falta que él mismo la creara), cualquier
 // 'validador' (pensado para personal de puerta que no organiza nada, y
 // que por ahora puede validar en cualquier fiesta — repartir validadores
 // por fiesta concreta queda anotado como mejora futura en el README), o
@@ -18,7 +19,7 @@ ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador"
     const code = req.params.code.trim().toUpperCase();
 
     const { rows } = await pool.query(
-      `SELECT tickets.*, events.title AS event_title, events.organizer_id,
+      `SELECT tickets.*, events.title AS event_title, events.organizer_id, events.category,
               events.event_date, events.event_time, events.location
        FROM tickets
        JOIN events ON events.id = tickets.event_id
@@ -30,8 +31,13 @@ ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador"
     if (!ticket) {
       return res.status(404).json({ error: "Esa entrada no existe. Revisa el código." });
     }
-    const canValidateAny = req.user.role === "admin" || req.user.role === "validador";
-    if (!canValidateAny && ticket.organizer_id !== req.user.id) {
+
+    let canValidateThis = req.user.role === "admin" || req.user.role === "validador";
+    if (!canValidateThis && req.user.role === "organizador" && req.user.organizerVenueId) {
+      const venueResult = await pool.query("SELECT name FROM venues WHERE id = $1", [req.user.organizerVenueId]);
+      canValidateThis = venueResult.rows[0]?.name === ticket.category;
+    }
+    if (!canValidateThis) {
       return res.status(403).json({ error: "Esta entrada no pertenece a ninguna de tus fiestas." });
     }
     if (ticket.status === "used") {
