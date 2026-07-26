@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { pool } from "../db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { formatDateLabel } from "../dateFormat.js";
+import { hasEventEnded } from "../eventTiming.js";
 
 export const ticketVerifyRouter = Router();
 
@@ -19,7 +20,7 @@ ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador"
 
     const { rows } = await pool.query(
       `SELECT tickets.*, events.title AS event_title, events.organizer_id, events.category,
-              events.event_date, events.event_time, events.location
+              events.event_date, events.event_time, events.end_time, events.location
        FROM tickets
        JOIN events ON events.id = tickets.event_id
        WHERE tickets.code = $1`,
@@ -63,6 +64,13 @@ ticketVerifyRouter.post("/:code/checkin", requireAuth, requireRole("organizador"
     }
     if (ticket.status === "refunded") {
       return res.status(409).json({ error: "Esta entrada fue reembolsada y ya no es válida." });
+    }
+    // Comprobamos esto DESPUÉS de "ya usada"/"reembolsada" a propósito —
+    // si alguien intenta re-escanear una entrada ya validada, el aviso
+    // más útil para quien está en la puerta sigue siendo "ya se validó",
+    // no "la fiesta ya terminó".
+    if (hasEventEnded(ticket)) {
+      return res.status(409).json({ error: "La fiesta ya ha terminado. Este código ya no es válido.", eventEnded: true });
     }
 
     await pool.query("UPDATE tickets SET status = 'used', checked_in_at = now() WHERE id = $1", [ticket.id]);

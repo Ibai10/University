@@ -366,6 +366,32 @@ probado), y cuando confirmes que va bien, te da las de producción.
   para gestionar un reembolso a mano — es un caso raro, pero puede pasar
   sin una reserva temporal de aforo (mejora anotada más abajo).
 
+## Hora de fin: los QR dejan de validar cuando acaba la fiesta
+
+Al publicar, además de la hora de inicio ahora hace falta también una
+**hora de fin** (`end_time`, obligatoria para fiestas nuevas) — a partir
+de ese momento, `POST /api/tickets/:code/checkin` rechaza el código con
+*"La fiesta ya ha terminado. Este código ya no es válido."*, para que las
+entradas no se queden válidas para siempre.
+
+- **Salto de madrugada**: como la mayoría de estas fiestas empiezan de
+  noche y acaban de madrugada del día siguiente, si la hora de fin es
+  "menor" que la de inicio (p. ej. de 23:00 a 06:00), se entiende
+  automáticamente que el fin es al día siguiente — no hay que indicarlo
+  a mano. Si organizas algo de día (10:00 a 18:00), no hay salto.
+- **Zona horaria**: el cálculo se hace siempre en hora de España
+  (`Europe/Madrid`, en `eventTiming.js`), sea cual sea la zona horaria en
+  la que corra el servidor — Render, por ejemplo, corre en UTC. Se tiene
+  en cuenta el cambio de hora de verano/invierno automáticamente.
+- **Compatibilidad con fiestas ya creadas**: las que existían antes de
+  esta función se quedan con `end_time = NULL` — para esas, los QR siguen
+  sin caducar nunca, exactamente como se comportaban hasta ahora. Nada
+  se rompe de golpe.
+- **Orden de prioridad de mensajes**: si una entrada ya se había validado
+  antes Y la fiesta además ya terminó, se sigue mostrando "ya se validó
+  antes" — es el aviso más útil para quien está en la puerta (indica
+  posible reutilización), no "la fiesta ya terminó".
+
 ## Límite de 1 entrada por persona
 
 Al publicar una fiesta, el organizador (o admin) puede marcarla con
@@ -456,7 +482,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/auth/reset-password`  |  —  | Cambia la contraseña con el código. Body: `{ email, code, newPassword }` |
 | GET    | `/api/events`               |  —  | Lista fiestas publicadas. Filtros opcionales: `?category=Despedidas&q=gijon` |
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
-| POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64 y `limit_one_per_buyer`) |
+| POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64, `limit_one_per_buyer` y exige `end_time`) |
 | POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
 | POST   | `/api/events/:id/cash-sale` |  ✓  | Un RRPP (o admin) vende entradas en efectivo a otras personas ya elegidas. Body: `{ buyer_ids: [...] }` — cada una recibe su propia entrada |
 | GET    | `/api/users/search?q=`      |  ✓  | Busca personas por nombre/nickname (sin email) — para que un RRPP encuentre a quién venderle. Rol rrpp o admin |
@@ -468,7 +494,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | DELETE | `/api/events/:id`           |  ✓  | Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
 | GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas |
-| POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya. |
+| POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya y todavía no ha terminado. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
 | POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` — requiere rol organizador o admin |
@@ -520,6 +546,7 @@ backend/
   auth.js            hash de contraseñas (scrypt) y JWT
   redsys.js            firma y verificación de pagos con Redsys
   loyalty.js            saldo, ganar y canjear puntos de fidelidad
+  eventTiming.js         cuándo termina de verdad una fiesta (zona horaria + salto de madrugada)
   email.js            envío del email de la entrada (Resend)
   dateFormat.js        formatea fechas en español, compartido por email y la vista de entrada
   seed.js            datos de ejemplo (npm run seed)

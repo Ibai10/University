@@ -283,7 +283,7 @@ eventsRouter.get("/:id", optionalAuth, async (req, res, next) => {
 // comprobación de verdad, por si alguien se salta la app).
 eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
-    const { title, description, location, event_date, event_time, price, capacity, image, residencia_id } =
+    const { title, description, location, event_date, event_time, end_time, price, capacity, image, residencia_id } =
       req.body || {};
     let { category } = req.body || {};
     const limitOnePerBuyer = req.body?.limit_one_per_buyer === true;
@@ -303,6 +303,12 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
 
     if (!title || !location || !event_date || !event_time) {
       return res.status(400).json({ error: "title, location, event_date y event_time son obligatorios." });
+    }
+    if (!end_time || !/^\d{2}:\d{2}$/.test(end_time)) {
+      return res.status(400).json({ error: "end_time (la hora de fin) es obligatoria, con formato HH:MM." });
+    }
+    if (end_time === event_time) {
+      return res.status(400).json({ error: "La hora de fin no puede ser igual a la de inicio." });
     }
     const venueName = String(category || "").trim();
     if (!venueName) {
@@ -336,10 +342,10 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, price_cents, capacity, image_base64, residencia_id, limit_one_per_buyer)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, end_time, price_cents, capacity, image_base64, residencia_id, limit_one_per_buyer)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
-      [req.user.id, title, venueName, description || "", location, event_date, event_time, priceCents, cap, image || null, residenciaId, limitOnePerBuyer]
+      [req.user.id, title, venueName, description || "", location, event_date, event_time, end_time, priceCents, cap, image || null, residenciaId, limitOnePerBuyer]
     );
 
     res.status(201).json(await withAvailability({ ...rows[0], residencia_name: residenciaName }));

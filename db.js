@@ -105,6 +105,12 @@ export async function initDb() {
       location TEXT NOT NULL,
       event_date TEXT NOT NULL,          -- 'YYYY-MM-DD'
       event_time TEXT NOT NULL,          -- 'HH:MM'
+      -- Hora a la que termina la fiesta ('HH:MM') — a partir de ahí, los
+      -- QR dejan de validar. NULL en fiestas creadas antes de esta
+      -- función (esas nunca caducan, para no romper nada de golpe).
+      -- Si es "menor" que event_time, se entiende que es de madrugada
+      -- del día siguiente (ver eventTiming.js).
+      end_time TEXT,
       price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
       capacity INTEGER NOT NULL CHECK (capacity > 0),
       status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published','cancelled')),
@@ -234,6 +240,7 @@ export async function initDb() {
     ALTER TABLE events ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
     ALTER TABLE events ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     ALTER TABLE events ADD COLUMN IF NOT EXISTS limit_one_per_buyer BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time TEXT;
 
     -- A qué discoteca está asignado un organizador (NULL = a ninguna
     -- todavía). Solo lo rellena un admin, desde el panel de
