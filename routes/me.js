@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { getPointsBalance, POINTS_PER_EURO, POINTS_PER_EURO_DISCOUNT } from "../loyalty.js";
+import { hasEventEnded } from "../eventTiming.js";
 
 export const meRouter = Router();
 
@@ -16,14 +17,22 @@ meRouter.get("/tickets", requireAuth, async (req, res, next) => {
          tickets.id, tickets.quantity, tickets.unit_price_cents, tickets.total_cents,
          tickets.code, tickets.status, tickets.purchased_at,
          events.id AS event_id, events.title, events.category,
-         events.location, events.event_date, events.event_time
+         events.location, events.event_date, events.event_time, events.end_time
        FROM tickets
        JOIN events ON events.id = tickets.event_id
        WHERE tickets.buyer_id = $1
        ORDER BY tickets.purchased_at DESC`,
       [req.user.id]
     );
-    res.json(rows);
+    // "Caducada" es solo un estado visual, no se guarda en la base de
+    // datos — una entrada 'valid' cuya fiesta ya terminó sin haberse
+    // usado nunca. Una entrada ya 'used' o 'refunded' no se marca como
+    // caducada, ya tiene su propio estado definitivo.
+    const withExpired = rows.map((ticket) => ({
+      ...ticket,
+      expired: ticket.status === "valid" && hasEventEnded(ticket),
+    }));
+    res.json(withExpired);
   } catch (err) {
     next(err);
   }

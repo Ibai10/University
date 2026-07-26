@@ -391,6 +391,12 @@ entradas no se queden válidas para siempre.
   antes Y la fiesta además ya terminó, se sigue mostrando "ya se validó
   antes" — es el aviso más útil para quien está en la puerta (indica
   posible reutilización), no "la fiesta ya terminó".
+- **En "Mis entradas"** (`GET /api/me/tickets`), cada entrada trae un
+  campo derivado `expired` (no se guarda en la base de datos, se calcula
+  al vuelo) — `true` cuando sigue en estado `valid` pero su fiesta ya
+  terminó sin haberse llegado a usar nunca. Una entrada ya `used` no se
+  marca como caducada, aunque la fiesta también haya terminado — ya tiene
+  su propio estado definitivo.
 
 ## Límite de 1 entrada por persona
 
@@ -493,7 +499,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | PATCH  | `/api/events/:id/cancel`    |  ✓  | Cancela tu fiesta (conserva las entradas ya vendidas) |
 | DELETE | `/api/events/:id`           |  ✓  | Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
-| GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas |
+| GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas — cada una incluye `expired: true` si es 'valid' y la fiesta ya terminó sin usarse |
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya y todavía no ha terminado. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
