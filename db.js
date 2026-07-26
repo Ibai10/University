@@ -113,6 +113,11 @@ export async function initDb() {
       -- hasta ahora). Con un valor = exclusiva para quien pertenezca a
       -- esa residencia; el resto de la gente ni la ve en el listado.
       residencia_id INTEGER REFERENCES residencias(id),
+      -- Cuándo se "borró" desde el punto de vista del organizador — no es
+      -- un borrado de verdad (eso rompería la entrada de quien ya la
+      -- compró), solo hace que deje de aparecer en "Tus fiestas". Solo
+      -- tiene sentido en fiestas ya canceladas.
+      archived_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -221,6 +226,7 @@ export async function initDb() {
     -- rellena al introducir el código de una residencia en la app.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
     ALTER TABLE events ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 
     -- A qué discoteca está asignado un organizador (NULL = a ninguna
     -- todavía). Solo lo rellena un admin, desde el panel de

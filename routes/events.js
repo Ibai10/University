@@ -139,6 +139,31 @@ export async function confirmPaidOrder(orderCode) {
 // que nadie más ve en este mismo listado.
 eventsRouter.get("/", optionalAuth, async (req, res, next) => {
   try {
+    // Un organizador solo ve, incluso en "Explorar", las fiestas de SU
+    // discoteca asignada — no las de las demás. Es la misma idea que ya
+    // aplicamos a "Mis fiestas" y a cancelar/borrar/validar, que se nos
+    // había quedado sin aplicar aquí. Sin discoteca asignada todavía, no
+    // ve ninguna (hasta que un admin le asigne una).
+    if (req.user?.role === "organizador") {
+      if (!req.user.organizerVenueId) {
+        return res.json([]);
+      }
+      const venueResult = await pool.query("SELECT name FROM venues WHERE id = $1", [req.user.organizerVenueId]);
+      const venueName = venueResult.rows[0]?.name;
+      if (!venueName) return res.json([]);
+
+      const { rows } = await pool.query(
+        `SELECT events.*, residencias.name AS residencia_name
+         FROM events
+         LEFT JOIN residencias ON residencias.id = events.residencia_id
+         WHERE events.status = 'published' AND events.category = $1
+         ORDER BY events.event_date ASC, events.event_time ASC`,
+        [venueName]
+      );
+      const withStats = await Promise.all(rows.map(withAvailability));
+      return res.json(withStats);
+    }
+
     const { category, q } = req.query;
     let sql = `
       SELECT events.*, residencias.name AS residencia_name
@@ -204,14 +229,14 @@ eventsRouter.get("/mine", requireAuth, async (req, res, next) => {
       sql = `SELECT events.*, residencias.name AS residencia_name
              FROM events
              LEFT JOIN residencias ON residencias.id = events.residencia_id
-             WHERE events.category = $1
+             WHERE events.category = $1 AND events.archived_at IS NULL
              ORDER BY events.created_at DESC`;
       params = [venueName];
     } else {
       sql = `SELECT events.*, residencias.name AS residencia_name
              FROM events
              LEFT JOIN residencias ON residencias.id = events.residencia_id
-             WHERE events.organizer_id = $1
+             WHERE events.organizer_id = $1 AND events.archived_at IS NULL
              ORDER BY events.created_at DESC`;
       params = [req.user.id];
     }
@@ -617,9 +642,15 @@ eventsRouter.patch("/:id/cancel", requireAuth, requireRole("organizador", "admin
 });
 
 // DELETE /api/events/:id
-// Borra la fiesta de verdad — solo si nadie ha comprado entradas todavía.
-// Si ya se vendió alguna, se rechaza y se sugiere cancelar en su lugar,
-// para no destruir el historial de compra de quien ya pagó.
+// Dos comportamientos distintos según el estado:
+//   - Si está CANCELADA: "borrarla" archiva la fila (desaparece de "Tus
+//     fiestas") pero no la elimina de verdad, sea cual sea el número de
+//     entradas vendidas — si se borrara de verdad, quien ya compró
+//     perdería su entrada de "Mis entradas" sin motivo. El QR y el
+//     historial de quien ya compró siguen intactos.
+//   - Si sigue PUBLICADA: se borra de verdad, pero solo si nadie ha
+//     comprado entradas todavía (si ya se vendió alguna, hay que
+//     cancelarla primero).
 eventsRouter.delete("/:id", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
@@ -627,6 +658,11 @@ eventsRouter.delete("/:id", requireAuth, requireRole("organizador", "admin"), as
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
     if (!(await canManageEvent(req, event))) {
       return res.status(403).json({ error: "Esta fiesta no es de tu discoteca." });
+    }
+
+    if (event.status === "cancelled") {
+      await pool.query("UPDATE events SET archived_at = now() WHERE id = $1", [event.id]);
+      return res.json({ ok: true });
     }
 
     const { sold } = await ticketStatsFor(event.id);
