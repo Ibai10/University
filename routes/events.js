@@ -164,6 +164,35 @@ eventsRouter.get("/", optionalAuth, async (req, res, next) => {
       return res.json(withStats);
     }
 
+    // Igual que el organizador, pero un validador puede estar asignado a
+    // VARIAS discotecas a la vez (venue_validators es muchos-a-muchos) —
+    // ve las fiestas de todas las suyas, ninguna del resto. Sin ninguna
+    // discoteca asignada todavía, no ve nada.
+    if (req.user?.role === "validador") {
+      const venueNamesResult = await pool.query(
+        `SELECT venues.name
+         FROM venue_validators
+         JOIN venues ON venues.id = venue_validators.venue_id
+         WHERE venue_validators.validator_id = $1`,
+        [req.user.id]
+      );
+      const venueNames = venueNamesResult.rows.map((r) => r.name);
+      if (venueNames.length === 0) {
+        return res.json([]);
+      }
+
+      const { rows } = await pool.query(
+        `SELECT events.*, residencias.name AS residencia_name
+         FROM events
+         LEFT JOIN residencias ON residencias.id = events.residencia_id
+         WHERE events.status = 'published' AND events.category = ANY($1)
+         ORDER BY events.event_date ASC, events.event_time ASC`,
+        [venueNames]
+      );
+      const withStats = await Promise.all(rows.map(withAvailability));
+      return res.json(withStats);
+    }
+
     const { category, q } = req.query;
     let sql = `
       SELECT events.*, residencias.name AS residencia_name
