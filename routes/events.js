@@ -327,7 +327,7 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
 // los demás.
 // El rol 'validador' no puede comprar — su cuenta existe solo para
 // escanear entradas en la puerta, no como cliente.
-eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organizador", "admin"), async (req, res, next) => {
+eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organizador", "rrpp", "admin"), async (req, res, next) => {
   try {
     const { rows: eventRows } = await pool.query(
       "SELECT * FROM events WHERE id = $1 AND status = 'published'",
@@ -385,6 +385,87 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
   }
 });
 
+// POST /api/events/:id/cash-sale
+// Un RRPP (o admin) vende entradas en efectivo a otras personas, ya
+// elegidas por nombre/nickname en la app. Cada persona seleccionada
+// recibe SU PROPIA entrada (su propio código, su propio email, aparece
+// en su propio "Mis entradas") — exactamente como si la hubiera comprado
+// ella misma por la pasarela de pago, pero sin que se cobre nada por la
+// plataforma: el dinero lo cobra el RRPP en persona, fuera de la app.
+// A propósito NO se ganan puntos de fidelidad aquí — no hay ningún pago
+// real verificable por la plataforma del que calcularlos.
+eventsRouter.post("/:id/cash-sale", requireAuth, requireRole("rrpp", "admin"), async (req, res, next) => {
+  try {
+    const { rows: eventRows } = await pool.query(
+      "SELECT * FROM events WHERE id = $1 AND status = 'published'",
+      [req.params.id]
+    );
+    const event = eventRows[0];
+    if (!event) return res.status(404).json({ error: "Evento no encontrado." });
+
+    const buyerIds = Array.isArray(req.body?.buyer_ids)
+      ? [...new Set(req.body.buyer_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    if (buyerIds.length === 0) {
+      return res.status(400).json({ error: "Selecciona al menos una persona." });
+    }
+
+    const { sold } = await ticketStatsFor(event.id);
+    const available = event.capacity - sold;
+    if (buyerIds.length > available) {
+      return res.status(409).json({ error: `Solo quedan ${available} entradas disponibles.` });
+    }
+
+    const buyersResult = await pool.query("SELECT id, email, name FROM users WHERE id = ANY($1)", [buyerIds]);
+    if (buyersResult.rows.length !== buyerIds.length) {
+      return res.status(400).json({ error: "Alguna de las personas seleccionadas ya no existe." });
+    }
+    const buyersById = new Map(buyersResult.rows.map((u) => [u.id, u]));
+
+    async function uniqueCode() {
+      let code = genCode();
+      while ((await pool.query("SELECT id FROM tickets WHERE code = $1", [code])).rows.length > 0) {
+        code = genCode();
+      }
+      return code;
+    }
+
+    const orderId = crypto.randomUUID();
+    const dateLabel = formatDateLabel(event.event_date, event.event_time);
+    const created = [];
+
+    for (const buyerId of buyerIds) {
+      const code = await uniqueCode();
+      const { rows } = await pool.query(
+        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id)
+         VALUES ($1, $2, 1, $3, $3, $4, $5, $6)
+         RETURNING *`,
+        [event.id, buyerId, event.price_cents, code, orderId, req.user.id]
+      );
+      const ticket = rows[0];
+      created.push(ticket);
+
+      const buyer = buyersById.get(buyerId);
+      // Cada persona recibe SU PROPIO email con SU PROPIA entrada — no un
+      // único correo compartido, porque son personas distintas, a
+      // diferencia de "comprar 3 para mí mismo".
+      sendTicketEmail({
+        to: buyer.email,
+        buyerName: buyer.name,
+        tickets: [ticket],
+        event: { ...event, dateLabel },
+      }).catch((err) => console.error("[email] Error inesperado enviando la entrada (venta en efectivo):", err.message));
+    }
+
+    res.status(201).json({
+      orderId,
+      tickets: created.map((t) => ({ ...t, buyerName: buyersById.get(t.buyer_id)?.name })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/events/:id/pay
 // Inicia un pago DE VERDAD con Redsys — a diferencia de /purchase (que
 // crea la entrada al momento, pensado para pruebas), aquí NO se crea
@@ -400,7 +481,7 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
 eventsRouter.post(
   "/:id/pay",
   requireAuth,
-  requireRole("comprador", "organizador", "admin"),
+  requireRole("comprador", "organizador", "rrpp", "admin"),
   async (req, res, next) => {
     try {
       const { rows: eventRows } = await pool.query(

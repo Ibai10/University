@@ -118,6 +118,7 @@ Cuatro roles, guardados en `users.role`:
 | `comprador` (por defecto) | Navegar y comprar entradas |
 | `organizador` | Todo lo del comprador + publicar/cancelar/borrar/validar fiestas — pero solo de la discoteca a la que un admin le haya asignado (ver sección más abajo) |
 | `validador` | Validar entradas — pero solo de las discotecas donde un organizador o admin lo haya añadido explícitamente (ver "Organizadores asignados a una discoteca"). No puede comprar entradas ni organizar |
+| `rrpp` | Todo lo del comprador + vender entradas en efectivo a otras personas (ver sección más abajo) |
 | `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
 
 Nadie puede auto-asignarse `organizador`, `validador` ni `admin` al
@@ -181,6 +182,36 @@ discoteca) o un admin lo haya añadido explícitamente.
 - El organizador de esa discoteca sigue pudiendo validar sus propias
   entradas siempre, sin necesidad de añadirse a sí mismo a ninguna lista
   — esta lista es específicamente para el rol `validador`.
+
+## RRPP: vender entradas en efectivo
+
+Un `rrpp` es exactamente un comprador normal (navega, compra, tiene sus
+propios puntos y sus propias entradas), más una capacidad extra: vender
+entradas en efectivo a otras personas, sin que se cobre nada por la
+plataforma — el dinero lo cobra el RRPP en persona.
+
+- **`GET /api/users/search?q=`** busca gente por nombre o nickname, para
+  que el RRPP encuentre a quién venderle. A propósito **no devuelve el
+  email** — un RRPP no es un admin, no debería poder ver el correo de
+  cualquiera solo con buscar.
+- **`POST /api/events/:id/cash-sale`** recibe una lista de ids de
+  compradores (`buyer_ids`) ya elegidos en la app, y crea **una entrada
+  individual por cada persona** — mismo patrón de "una fila, un código,
+  un QR" que ya usa el resto de la app. Comprueba el aforo real antes de
+  crear nada, igual que las demás formas de comprar.
+- **Cada persona recibe su propia entrada exactamente como si la hubiera
+  comprado ella misma**: su propio email con el QR, y aparece en su
+  propio "Mis entradas" — el RRPP no se queda con ninguna entrada para sí
+  mismo (a menos que se incluya a sí mismo en la lista, que también es
+  válido).
+- **No se ganan puntos de fidelidad** en una venta en efectivo — no hay
+  ningún pago real verificable por la plataforma del que calcularlos (el
+  dinero no pasa por aquí). Cada entrada guarda `sold_by_rrpp_id` (quién
+  la vendió) para poder llevar la cuenta de quién ha vendido qué, aunque
+  todavía no hay ninguna pantalla que muestre ese resumen — sería el
+  siguiente paso natural si hiciera falta un balance de ventas por RRPP.
+- Un admin puede hacer lo mismo que un RRPP (buscar y vender en
+  efectivo), para cualquier fiesta.
 
 ## Residencias de estudiantes
 
@@ -385,6 +416,8 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
 | POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64) |
 | POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
+| POST   | `/api/events/:id/cash-sale` |  ✓  | Un RRPP (o admin) vende entradas en efectivo a otras personas ya elegidas. Body: `{ buyer_ids: [...] }` — cada una recibe su propia entrada |
+| GET    | `/api/users/search?q=`      |  ✓  | Busca personas por nombre/nickname (sin email) — para que un RRPP encuentre a quién venderle. Rol rrpp o admin |
 | POST   | `/api/events/:id/pay`       |  ✓  | Inicia un pago con Redsys. Body: `{ quantity, points_to_redeem }` → `{ orderCode, paid, paymentUrl? , tickets? }`. Si los puntos cubren el total, `paid:true` y llegan las entradas ya creadas, sin pasar por el banco |
 | GET    | `/api/me/points`            |  ✓  | Saldo de puntos de fidelidad y las tarifas vigentes |
 | POST   | `/api/payments/notify`      |  —  | Webhook de Redsys (servidor a servidor) — no lo llama nadie a mano |
@@ -456,6 +489,7 @@ backend/
     admin.js           buscar usuarios y cambiar su rol (solo admin)
     payments.js         formulario de pago, webhook de Redsys, estado del pedido
     residencias.js       crear residencias, unirse por código, catálogo de merchandising y galería de fotos
+    users.js              buscar personas por nombre/nickname (para la venta en efectivo del RRPP)
 ```
 
 ## Decisiones de diseño que conviene conocer

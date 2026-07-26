@@ -4,7 +4,7 @@ import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 
 export const adminRouter = Router();
 
-const VALID_ROLES = ["comprador", "organizador", "validador", "admin"];
+const VALID_ROLES = ["comprador", "organizador", "validador", "rrpp", "admin"];
 
 // Todas las rutas de este archivo son solo para administradores.
 adminRouter.use(requireAuth, requireRole("admin"));

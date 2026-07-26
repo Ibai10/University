@@ -119,7 +119,11 @@ export async function initDb() {
       order_id TEXT,
       status TEXT NOT NULL DEFAULT 'valid' CHECK (status IN ('valid','used','refunded')),
       purchased_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      checked_in_at TIMESTAMPTZ
+      checked_in_at TIMESTAMPTZ,
+      -- Si no es NULL, esta entrada se vendió en efectivo por un RRPP (el
+      -- id de quien la vendió) en vez de comprarse por la propia persona
+      -- a través de la pasarela de pago.
+      sold_by_rrpp_id INTEGER REFERENCES users(id)
     );
 
     -- Un pedido de pago con Redsys. Se crea en 'pending' al iniciar el
@@ -196,6 +200,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS points_redeemed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS discount_cents INTEGER NOT NULL DEFAULT 0;
 
