@@ -366,6 +366,23 @@ probado), y cuando confirmes que va bien, te da las de producción.
   para gestionar un reembolso a mano — es un caso raro, pero puede pasar
   sin una reserva temporal de aforo (mejora anotada más abajo).
 
+## Límite de 1 entrada por persona
+
+Al publicar una fiesta, el organizador (o admin) puede marcarla con
+`limit_one_per_buyer: true` — pensado para fiestas con mucha demanda
+donde no se quiere que alguien acapare varias entradas.
+
+- Se aplica en las dos formas de comprar de verdad: `POST
+  /api/events/:id/purchase` y `POST /api/events/:id/pay` rechazan
+  `quantity > 1` con un mensaje claro si la fiesta tiene este límite.
+- **No afecta a la venta en efectivo de un RRPP**
+  (`POST /api/events/:id/cash-sale`) — ahí cada persona seleccionada ya
+  recibe exactamente 1 entrada de por sí, así que el límite no tiene
+  nada que restringir en ese flujo; se puede vender a tantas personas
+  distintas como se quiera, cada una con su entrada.
+- Por defecto es `false` (sin límite) — ninguna fiesta que ya existiera
+  antes de esta función se ve afectada.
+
 ## Puntos de fidelidad
 
 Se ganan puntos comprando entradas de verdad, y se pueden canjear por
@@ -439,7 +456,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/auth/reset-password`  |  —  | Cambia la contraseña con el código. Body: `{ email, code, newPassword }` |
 | GET    | `/api/events`               |  —  | Lista fiestas publicadas. Filtros opcionales: `?category=Despedidas&q=gijon` |
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
-| POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64) |
+| POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64 y `limit_one_per_buyer`) |
 | POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
 | POST   | `/api/events/:id/cash-sale` |  ✓  | Un RRPP (o admin) vende entradas en efectivo a otras personas ya elegidas. Body: `{ buyer_ids: [...] }` — cada una recibe su propia entrada |
 | GET    | `/api/users/search?q=`      |  ✓  | Busca personas por nombre/nickname (sin email) — para que un RRPP encuentre a quién venderle. Rol rrpp o admin |

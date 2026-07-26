@@ -286,6 +286,7 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
     const { title, description, location, event_date, event_time, price, capacity, image, residencia_id } =
       req.body || {};
     let { category } = req.body || {};
+    const limitOnePerBuyer = req.body?.limit_one_per_buyer === true;
 
     if (req.user.role === "organizador") {
       if (!req.user.organizerVenueId) {
@@ -335,10 +336,10 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, price_cents, capacity, image_base64, residencia_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, price_cents, capacity, image_base64, residencia_id, limit_one_per_buyer)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [req.user.id, title, venueName, description || "", location, event_date, event_time, priceCents, cap, image || null, residenciaId]
+      [req.user.id, title, venueName, description || "", location, event_date, event_time, priceCents, cap, image || null, residenciaId, limitOnePerBuyer]
     );
 
     res.status(201).json(await withAvailability({ ...rows[0], residencia_name: residenciaName }));
@@ -369,6 +370,9 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
     const quantity = Number(req.body?.quantity);
     if (!Number.isInteger(quantity) || quantity <= 0) {
       return res.status(400).json({ error: "quantity debe ser un entero mayor que 0." });
+    }
+    if (event.limit_one_per_buyer && quantity > 1) {
+      return res.status(400).json({ error: "Esta fiesta solo permite comprar 1 entrada por persona." });
     }
 
     const { sold } = await ticketStatsFor(event.id);
@@ -541,6 +545,9 @@ eventsRouter.post(
       const quantity = Number(req.body?.quantity);
       if (!Number.isInteger(quantity) || quantity <= 0) {
         return res.status(400).json({ error: "quantity debe ser un entero mayor que 0." });
+      }
+      if (event.limit_one_per_buyer && quantity > 1) {
+        return res.status(400).json({ error: "Esta fiesta solo permite comprar 1 entrada por persona." });
       }
 
       const { sold } = await ticketStatsFor(event.id);

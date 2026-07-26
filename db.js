@@ -118,6 +118,12 @@ export async function initDb() {
       -- compró), solo hace que deje de aparecer en "Tus fiestas". Solo
       -- tiene sentido en fiestas ya canceladas.
       archived_at TIMESTAMPTZ,
+      -- Si es TRUE, solo se puede comprar 1 entrada por persona en una
+      -- misma compra normal (por Redsys o la de pruebas) — pensado para
+      -- fiestas con mucha demanda donde no se quiere que alguien acapare
+      -- varias. NO afecta a la venta en efectivo de un RRPP, que ya de
+      -- por sí da exactamente 1 entrada a cada persona seleccionada.
+      limit_one_per_buyer BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -227,6 +233,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
     ALTER TABLE events ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
     ALTER TABLE events ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS limit_one_per_buyer BOOLEAN NOT NULL DEFAULT false;
 
     -- A qué discoteca está asignado un organizador (NULL = a ninguna
     -- todavía). Solo lo rellena un admin, desde el panel de
