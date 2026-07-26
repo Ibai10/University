@@ -70,6 +70,19 @@ export async function initDb() {
       UNIQUE(venue_id, validator_id)
     );
 
+    -- Igual que venue_validators, pero para quién puede vender entradas EN
+    -- EFECTIVO de cada discoteca (rol 'rrpp'). Un RRPP solo puede hacer
+    -- ventas en efectivo de las discotecas donde esté aquí — no de
+    -- cualquiera, igual que un validador no puede escanear en cualquiera.
+    CREATE TABLE IF NOT EXISTS venue_rrpp (
+      id SERIAL PRIMARY KEY,
+      venue_id INTEGER NOT NULL REFERENCES venues(id),
+      rrpp_id INTEGER NOT NULL REFERENCES users(id),
+      assigned_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(venue_id, rrpp_id)
+    );
+
     -- Una residencia de estudiantes. Solo un admin puede crear una (botón
     -- en el panel de administración) — al crearla se genera un código
     -- único que se le da a los residentes; quien lo introduce en la app
@@ -239,5 +252,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_organizer_venue ON users(organizer_venue_id);
     CREATE INDEX IF NOT EXISTS idx_venue_validators_venue ON venue_validators(venue_id);
     CREATE INDEX IF NOT EXISTS idx_venue_validators_validator ON venue_validators(validator_id);
+    CREATE INDEX IF NOT EXISTS idx_venue_rrpp_venue ON venue_rrpp(venue_id);
+    CREATE INDEX IF NOT EXISTS idx_venue_rrpp_rrpp ON venue_rrpp(rrpp_id);
   `);
 }

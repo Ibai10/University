@@ -47,10 +47,10 @@ venuesRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
   }
 });
 
-// ¿Puede este usuario gestionar los validadores de esta discoteca? Un
-// admin, cualquiera. Un organizador, solo si es SU discoteca asignada —
-// no puede tocar la lista de validadores de otra.
-function canManageVenueValidators(req, venueId) {
+// ¿Puede este usuario gestionar el personal (validadores o RRPP) de esta
+// discoteca? Un admin, cualquiera. Un organizador, solo si es SU
+// discoteca asignada — no puede tocar la de otra.
+function canManageVenueStaff(req, venueId) {
   if (req.user.role === "admin") return true;
   return req.user.role === "organizador" && req.user.organizerVenueId === venueId;
 }
@@ -60,7 +60,7 @@ function canManageVenueValidators(req, venueId) {
 venuesRouter.get("/:id/validators", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const venueId = Number(req.params.id);
-    if (!canManageVenueValidators(req, venueId)) {
+    if (!canManageVenueStaff(req, venueId)) {
       return res.status(403).json({ error: "Esta discoteca no es la tuya." });
     }
 
@@ -84,7 +84,7 @@ venuesRouter.get("/:id/validators", requireAuth, requireRole("organizador", "adm
 venuesRouter.get("/:id/validators/search", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const venueId = Number(req.params.id);
-    if (!canManageVenueValidators(req, venueId)) {
+    if (!canManageVenueStaff(req, venueId)) {
       return res.status(403).json({ error: "Esta discoteca no es la tuya." });
     }
 
@@ -109,7 +109,7 @@ venuesRouter.get("/:id/validators/search", requireAuth, requireRole("organizador
 venuesRouter.post("/:id/validators", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const venueId = Number(req.params.id);
-    if (!canManageVenueValidators(req, venueId)) {
+    if (!canManageVenueStaff(req, venueId)) {
       return res.status(403).json({ error: "Esta discoteca no es la tuya." });
     }
 
@@ -141,7 +141,7 @@ venuesRouter.post("/:id/validators", requireAuth, requireRole("organizador", "ad
 venuesRouter.delete("/:id/validators/:validatorId", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const venueId = Number(req.params.id);
-    if (!canManageVenueValidators(req, venueId)) {
+    if (!canManageVenueStaff(req, venueId)) {
       return res.status(403).json({ error: "Esta discoteca no es la tuya." });
     }
 
@@ -149,6 +149,118 @@ venuesRouter.delete("/:id/validators/:validatorId", requireAuth, requireRole("or
       venueId,
       req.params.validatorId,
     ]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/venues/:id/rrpp
+// Quién puede vender entradas en efectivo de esta discoteca ahora mismo.
+venuesRouter.get("/:id/rrpp", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
+  try {
+    const venueId = Number(req.params.id);
+    if (!canManageVenueStaff(req, venueId)) {
+      return res.status(403).json({ error: "Esta discoteca no es la tuya." });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT users.id, users.name, users.nickname, users.email
+       FROM venue_rrpp
+       JOIN users ON users.id = venue_rrpp.rrpp_id
+       WHERE venue_rrpp.venue_id = $1
+       ORDER BY users.name ASC`,
+      [venueId]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/venues/:id/rrpp/search?q=nombre
+// Busca gente para añadir como RRPP de esta discoteca. A diferencia de la
+// búsqueda de validadores, aquí SÍ pueden salir compradores normales —
+// añadirlos como RRPP los convierte en ese rol al momento (ver POST de
+// abajo). No salen cuentas con otro rol (organizador/validador/admin):
+// esas no se pueden convertir en RRPP desde aquí.
+venuesRouter.get("/:id/rrpp/search", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
+  try {
+    const venueId = Number(req.params.id);
+    if (!canManageVenueStaff(req, venueId)) {
+      return res.status(403).json({ error: "Esta discoteca no es la tuya." });
+    }
+
+    const q = String(req.query.q || "").trim();
+    let sql = "SELECT id, name, nickname, email, role FROM users WHERE role IN ('comprador', 'rrpp')";
+    const params = [];
+    if (q) {
+      params.push(`%${q}%`);
+      sql += ` AND (name ILIKE $1 OR nickname ILIKE $1 OR email ILIKE $1)`;
+    }
+    sql += " ORDER BY name ASC LIMIT 30";
+
+    const { rows } = await pool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/venues/:id/rrpp
+// Añade a alguien como RRPP de esta discoteca. Body: { user_id }. Si la
+// persona todavía es un comprador normal, se convierte en RRPP al
+// momento como parte de esta misma acción — un organizador puede dar
+// este rol en concreto (y solo este), aunque no pueda tocar ningún otro.
+venuesRouter.post("/:id/rrpp", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
+  try {
+    const venueId = Number(req.params.id);
+    if (!canManageVenueStaff(req, venueId)) {
+      return res.status(403).json({ error: "Esta discoteca no es la tuya." });
+    }
+
+    const userId = Number(req.body?.user_id);
+    if (!userId) {
+      return res.status(400).json({ error: "user_id es obligatorio." });
+    }
+
+    const userCheck = await pool.query("SELECT id, role FROM users WHERE id = $1", [userId]);
+    if (!userCheck.rows[0]) return res.status(404).json({ error: "Ese usuario no existe." });
+    const currentRole = userCheck.rows[0].role;
+    if (currentRole !== "comprador" && currentRole !== "rrpp") {
+      return res.status(400).json({
+        error: "Esa cuenta ya tiene otro rol (organizador, validador o admin) y no se puede convertir en RRPP desde aquí.",
+      });
+    }
+
+    if (currentRole === "comprador") {
+      await pool.query("UPDATE users SET role = 'rrpp' WHERE id = $1", [userId]);
+    }
+
+    await pool.query(
+      "INSERT INTO venue_rrpp (venue_id, rrpp_id, assigned_by) VALUES ($1, $2, $3) ON CONFLICT (venue_id, rrpp_id) DO NOTHING",
+      [venueId, userId, req.user.id]
+    );
+
+    const { rows } = await pool.query("SELECT id, name, nickname, email, role FROM users WHERE id = $1", [userId]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/venues/:id/rrpp/:rrppId
+// Quita a alguien de la lista de RRPP de esta discoteca. No le retira el
+// rol (podría estar asignado a otra discoteca, o querer conservarlo) —
+// solo deja de poder vender en efectivo aquí.
+venuesRouter.delete("/:id/rrpp/:rrppId", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
+  try {
+    const venueId = Number(req.params.id);
+    if (!canManageVenueStaff(req, venueId)) {
+      return res.status(403).json({ error: "Esta discoteca no es la tuya." });
+    }
+
+    await pool.query("DELETE FROM venue_rrpp WHERE venue_id = $1 AND rrpp_id = $2", [venueId, req.params.rrppId]);
     res.json({ ok: true });
   } catch (err) {
     next(err);

@@ -31,18 +31,23 @@ export async function ticketStatsFor(eventId) {
   const { rows } = await pool.query(
     `SELECT
        COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used')), 0) AS sold,
-       COALESCE(SUM(quantity) FILTER (WHERE status = 'used'), 0) AS validated
+       COALESCE(SUM(quantity) FILTER (WHERE status = 'used'), 0) AS validated,
+       COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used') AND sold_by_rrpp_id IS NOT NULL), 0) AS sold_via_rrpp
      FROM tickets WHERE event_id = $1`,
     [eventId]
   );
-  return { sold: Number(rows[0].sold), validated: Number(rows[0].validated) };
+  return {
+    sold: Number(rows[0].sold),
+    validated: Number(rows[0].validated),
+    soldViaRrpp: Number(rows[0].sold_via_rrpp),
+  };
 }
 
 async function withAvailability(event) {
-  const { sold, validated } = await ticketStatsFor(event.id);
+  const { sold, validated, soldViaRrpp } = await ticketStatsFor(event.id);
   const { residencia_name, ...rest } = event;
   const residencia = event.residencia_id ? { id: event.residencia_id, name: residencia_name } : null;
-  return { ...rest, sold, validated, available: Math.max(0, event.capacity - sold), residencia };
+  return { ...rest, sold, validated, soldViaRrpp, available: Math.max(0, event.capacity - sold), residencia };
 }
 
 export function genCode() {
@@ -394,6 +399,10 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
 // plataforma: el dinero lo cobra el RRPP en persona, fuera de la app.
 // A propósito NO se ganan puntos de fidelidad aquí — no hay ningún pago
 // real verificable por la plataforma del que calcularlos.
+// Un RRPP solo puede vender entradas de las discotecas donde un
+// organizador (o admin) lo haya añadido explícitamente — igual que un
+// validador solo puede escanear en las suyas. Un admin no tiene esta
+// restricción.
 eventsRouter.post("/:id/cash-sale", requireAuth, requireRole("rrpp", "admin"), async (req, res, next) => {
   try {
     const { rows: eventRows } = await pool.query(
@@ -402,6 +411,19 @@ eventsRouter.post("/:id/cash-sale", requireAuth, requireRole("rrpp", "admin"), a
     );
     const event = eventRows[0];
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
+
+    if (req.user.role === "rrpp") {
+      const assignment = await pool.query(
+        `SELECT 1
+         FROM venue_rrpp
+         JOIN venues ON venues.id = venue_rrpp.venue_id
+         WHERE venue_rrpp.rrpp_id = $1 AND venues.name = $2`,
+        [req.user.id, event.category]
+      );
+      if (assignment.rows.length === 0) {
+        return res.status(403).json({ error: "No puedes vender entradas en efectivo de esta discoteca." });
+      }
+    }
 
     const buyerIds = Array.isArray(req.body?.buyer_ids)
       ? [...new Set(req.body.buyer_ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]

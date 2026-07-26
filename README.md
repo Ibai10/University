@@ -118,7 +118,7 @@ Cuatro roles, guardados en `users.role`:
 | `comprador` (por defecto) | Navegar y comprar entradas |
 | `organizador` | Todo lo del comprador + publicar/cancelar/borrar/validar fiestas — pero solo de la discoteca a la que un admin le haya asignado (ver sección más abajo) |
 | `validador` | Validar entradas — pero solo de las discotecas donde un organizador o admin lo haya añadido explícitamente (ver "Organizadores asignados a una discoteca"). No puede comprar entradas ni organizar |
-| `rrpp` | Todo lo del comprador + vender entradas en efectivo a otras personas (ver sección más abajo) |
+| `rrpp` | Todo lo del comprador + vender entradas en efectivo — pero solo de las discotecas donde lo hayan añadido explícitamente (ver sección más abajo) |
 | `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
 
 Nadie puede auto-asignarse `organizador`, `validador` ni `admin` al
@@ -207,11 +207,36 @@ plataforma — el dinero lo cobra el RRPP en persona.
 - **No se ganan puntos de fidelidad** en una venta en efectivo — no hay
   ningún pago real verificable por la plataforma del que calcularlos (el
   dinero no pasa por aquí). Cada entrada guarda `sold_by_rrpp_id` (quién
-  la vendió) para poder llevar la cuenta de quién ha vendido qué, aunque
-  todavía no hay ninguna pantalla que muestre ese resumen — sería el
-  siguiente paso natural si hiciera falta un balance de ventas por RRPP.
+  la vendió), y las estadísticas de cada fiesta (`GET /api/events/mine`)
+  incluyen `soldViaRrpp` — cuántas de las vendidas fueron en efectivo,
+  para diferenciarlas del resto.
 - Un admin puede hacer lo mismo que un RRPP (buscar y vender en
-  efectivo), para cualquier fiesta.
+  efectivo), para cualquier fiesta, sin ninguna restricción de discoteca.
+
+### Un RRPP solo vende en la discoteca donde lo hayan añadido
+
+Igual que un validador, un RRPP no puede vender en efectivo de cualquier
+fiesta — solo de las discotecas donde un organizador (el de esa
+discoteca) o un admin lo haya añadido explícitamente a `venue_rrpp`.
+
+- **Quién puede asignar el rol RRPP**: un organizador (o admin) puede
+  darle este rol a alguien — pero **solo este rol en concreto**, nunca
+  otro. Está resuelto de forma unificada: al buscar gente para añadir a
+  la lista de RRPP de su discoteca
+  (`GET /api/venues/:id/rrpp/search?q=`), si la persona encontrada
+  todavía es un `comprador` normal, añadirla
+  (`POST /api/venues/:id/rrpp`) la convierte en `rrpp` **y** la asigna a
+  esa discoteca en la misma acción. Si la cuenta ya tiene otro rol
+  (organizador, validador o admin), se rechaza — un organizador no puede
+  tocar esos roles, ni siquiera de forma indirecta.
+- **Un organizador solo gestiona la lista de RRPP de su propia
+  discoteca** — no puede tocar la de otra (403). Un admin puede gestionar
+  la de cualquiera.
+- **Quitar a alguien de la lista no le retira el rol RRPP** — podría estar
+  asignado a otra discoteca, o el organizador solo estar reorganizando su
+  equipo. Retirar el rol del todo sería una acción aparte (ya disponible
+  para un admin desde el panel general de usuarios).
+- Un mismo RRPP puede estar asignado a varias discotecas a la vez.
 
 ## Residencias de estudiantes
 
@@ -434,6 +459,10 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/venues/:id/validators/search?q=` |  ✓  | Busca entre todas las cuentas con rol validador, por nombre/nickname/email |
 | POST   | `/api/venues/:id/validators` |  ✓  | Añade un validador a la discoteca. Body: `{ validator_id }` |
 | DELETE | `/api/venues/:id/validators/:validatorId` |  ✓  | Quita a un validador de la discoteca |
+| GET    | `/api/venues/:id/rrpp`      |  ✓  | Quién puede vender entradas en efectivo de esta discoteca — organizador (solo la suya) o admin |
+| GET    | `/api/venues/:id/rrpp/search?q=` |  ✓  | Busca compradores y RRPP por nombre/nickname/email, para añadir |
+| POST   | `/api/venues/:id/rrpp`     |  ✓  | Añade a alguien como RRPP de la discoteca. Body: `{ user_id }` — si era comprador, lo convierte en RRPP al momento |
+| DELETE | `/api/venues/:id/rrpp/:rrppId` |  ✓  | Quita a alguien de la lista de RRPP de la discoteca (no le retira el rol) |
 | GET    | `/api/admin/users`          |  ✓  | Busca usuarios por email/nickname/nombre (`?q=`) — solo admin |
 | PATCH  | `/api/admin/users/:id/role` |  ✓  | Cambia el rol de un usuario. Body: `{ role }` — solo admin |
 | GET    | `/api/admin/organizadores`  |  ✓  | Lista todas las cuentas con rol organizador, con su discoteca asignada — solo admin |
