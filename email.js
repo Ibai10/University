@@ -84,6 +84,67 @@ export async function sendTicketEmail({ to, buyerName, tickets, event }) {
   }
 }
 
+export async function sendMerchandiseEmail({ to, buyerName, purchases, merchandise }) {
+  if (!resend) {
+    console.log(`[email] RESEND_API_KEY no configurada — no se envía email a ${to}.`);
+    return;
+  }
+
+  const totalCents = purchases.reduce((sum, p) => sum + p.unit_price_cents, 0);
+  const count = purchases.length;
+
+  const purchaseRows = purchases
+    .map((purchase, i) => {
+      const viewUrl = `${PUBLIC_APP_URL}/api/merchandise-purchases/${purchase.code}/view`;
+      return `
+        <div style="background:#0E2429;border:1px solid #22474D;border-radius:12px;padding:14px;margin-top:${i === 0 ? "20" : "10"}px;">
+          <p style="color:#8FA6A3;font-size:12px;margin:0 0 8px;">Unidad ${i + 1} de ${count} · <span style="font-family:monospace;color:#F2A93B;">${purchase.code}</span></p>
+          <a href="${viewUrl}" style="display:block;text-align:center;background:#F2A93B;color:#0E2429;font-weight:bold;font-size:14px;text-decoration:none;padding:12px;border-radius:999px;">
+            Ver este código de recogida
+          </a>
+        </div>
+      `;
+    })
+    .join("");
+
+  const html = `
+    <div style="background:#0E2429;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:480px;margin:0 auto;background:#153136;border-radius:16px;overflow:hidden;border:1px solid #22474D;">
+        <div style="padding:28px 28px 20px;text-align:center;">
+          <div style="width:48px;height:48px;border-radius:24px;background:#F2A93B;display:inline-flex;align-items:center;justify-content:center;font-size:24px;line-height:48px;margin-bottom:12px;">🛍️</div>
+          <h1 style="color:#F5F1E8;font-size:22px;margin:0 0 4px;">¡Gracias por tu compra!</h1>
+          <p style="color:#8FA6A3;font-size:14px;margin:0;">Hola ${buyerName || ""}, esto es lo que has comprado.</p>
+        </div>
+        <div style="padding:0 28px 24px;">
+          <div style="background:#0E2429;border:1px solid #22474D;border-radius:12px;padding:16px;">
+            <p style="color:#F5F1E8;font-size:17px;font-weight:bold;margin:0 0 8px;">${merchandise.name}</p>
+            <p style="color:#8FA6A3;font-size:13px;margin:0;">${count} unidad${count > 1 ? "es" : ""} · ${euros(totalCents)}€</p>
+          </div>
+
+          ${
+            count > 1
+              ? `<p style="color:#8FA6A3;font-size:12px;text-align:center;margin-top:16px;">Cada unidad tiene su propio código, para poder recogerlas por separado si hace falta.</p>`
+              : ""
+          }
+
+          ${purchaseRows}
+        </div>
+      </div>
+    </div>
+  `;
+
+  try {
+    await resend.emails.send({
+      from: FROM,
+      to,
+      subject: `Tu compra: ${merchandise.name}`,
+      html,
+    });
+  } catch (err) {
+    console.error("[email] No se pudo enviar el correo del producto:", err.message);
+  }
+}
+
 export async function sendPasswordResetEmail({ to, name, code }) {
   if (!resend) {
     console.log(`[email] RESEND_API_KEY no configurada — no se envía email de recuperación a ${to}.`);

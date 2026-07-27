@@ -202,8 +202,45 @@ export async function initDb() {
       description TEXT NOT NULL DEFAULT '',
       price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
       image_base64 TEXT,
+      -- NULL = sin límite de stock. Con un número, no se puede vender más
+      -- unidades de las que quedan (se calcula restando lo ya comprado,
+      -- igual que "available" en events se calcula restando "sold").
+      stock INTEGER,
       created_by INTEGER REFERENCES users(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Un pedido de pago de merchandising — mismo patrón que
+    -- payment_orders (pending -> paid/failed vía la notificación de
+    -- Redsys), pero para productos en vez de entradas.
+    CREATE TABLE IF NOT EXISTS merchandise_orders (
+      id SERIAL PRIMARY KEY,
+      order_code TEXT UNIQUE NOT NULL,
+      merchandise_id INTEGER NOT NULL REFERENCES merchandise(id),
+      buyer_id INTEGER NOT NULL REFERENCES users(id),
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      amount_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','failed')),
+      redsys_response TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      paid_at TIMESTAMPTZ
+    );
+
+    -- Cada unidad comprada, con su propio código y QR — igual que con las
+    -- entradas, una fila por unidad (si compras 3 sudaderas, son 3 filas),
+    -- para que cada una se pueda recoger/entregar por separado.
+    -- 'used' aquí significa "ya entregada/recogida", no "validada en la
+    -- puerta" como en tickets, pero es el mismo concepto de fondo.
+    CREATE TABLE IF NOT EXISTS merchandise_purchases (
+      id SERIAL PRIMARY KEY,
+      merchandise_id INTEGER NOT NULL REFERENCES merchandise(id),
+      buyer_id INTEGER NOT NULL REFERENCES users(id),
+      unit_price_cents INTEGER NOT NULL,
+      code TEXT UNIQUE NOT NULL,
+      order_id TEXT,
+      status TEXT NOT NULL DEFAULT 'valid' CHECK (status IN ('valid','used','refunded')),
+      purchased_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      delivered_at TIMESTAMPTZ
     );
 
     -- Galería de fotos por residencia — mismo criterio de acceso que el
@@ -231,6 +268,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
+    ALTER TABLE merchandise ADD COLUMN IF NOT EXISTS stock INTEGER;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS points_redeemed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS discount_cents INTEGER NOT NULL DEFAULT 0;
 
@@ -268,6 +306,10 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_residencia ON users(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_events_residencia ON events(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_merchandise_residencia ON merchandise(residencia_id);
+    CREATE INDEX IF NOT EXISTS idx_merch_orders_buyer ON merchandise_orders(buyer_id);
+    CREATE INDEX IF NOT EXISTS idx_merch_orders_merch ON merchandise_orders(merchandise_id);
+    CREATE INDEX IF NOT EXISTS idx_merch_purchases_buyer ON merchandise_purchases(buyer_id);
+    CREATE INDEX IF NOT EXISTS idx_merch_purchases_merch ON merchandise_purchases(merchandise_id);
     CREATE INDEX IF NOT EXISTS idx_residencia_photos_residencia ON residencia_photos(residencia_id);
     CREATE INDEX IF NOT EXISTS idx_users_organizer_venue ON users(organizer_venue_id);
     CREATE INDEX IF NOT EXISTS idx_venue_validators_venue ON venue_validators(venue_id);

@@ -204,6 +204,41 @@ discoteca) o un admin lo haya añadido explícitamente.
   entradas siempre, sin necesidad de añadirse a sí mismo a ninguna lista
   — esta lista es específicamente para el rol `validador`.
 
+## Comprar merchandising (funciona como las entradas)
+
+El merchandising de una residencia ya se compra de verdad, reutilizando
+casi todo el sistema que ya tenían las entradas — mismo Redsys, mismo
+patrón de "una unidad, un código, un QR", mismo email de confirmación.
+
+- **`payment_orders`/`tickets` tienen su equivalente**:
+  `merchandise_orders` (el pedido, pendiente → pagado/fallido) y
+  `merchandise_purchases` (una fila por unidad comprada, con su propio
+  código — si compras 3 gorras, son 3 filas, para poder recogerlas por
+  separado si hace falta).
+- **El mismo webhook de Redsys** (`POST /api/payments/notify`) sirve para
+  los dos tipos de pedido — busca primero en `payment_orders`, y si no lo
+  encuentra, en `merchandise_orders`. La firma, la verificación y la
+  idempotencia son exactamente las mismas.
+- **Solo puede comprar quien pertenezca a esa residencia** (o un admin) —
+  mismo criterio que ya tenía el catálogo para solo poder *verlo*, ahora
+  también aplica a comprarlo.
+- **Stock opcional** (`stock` en `merchandise`, `NULL` = sin límite) — se
+  calcula igual que el aforo de un evento, restando lo ya comprado. Se
+  vuelve a comprobar en el momento de confirmar el pago, no solo al
+  iniciarlo, por si acaso se agotó mientras tanto.
+- **`GET /api/me/merchandise`** es el equivalente de `/me/tickets` — cada
+  unidad comprada con su código, para que la app tenga su propia sección
+  de "Mis productos".
+- **La entrega/recogida se valida como una entrada**:
+  `POST /api/merchandise-purchases/:code/checkin` marca una unidad como
+  entregada (solo admin) — con el mismo bloqueo de "ya se entregó antes"
+  que ya tenían las entradas. También hay una página pública con el QR
+  (`GET /api/merchandise-purchases/:code/view`), a la que enlaza el email
+  de confirmación.
+- **No se ganan ni se canjean puntos de fidelidad** en una compra de
+  merchandising — el sistema de puntos, de momento, sigue siendo
+  específico de las entradas.
+
 ## RRPP: vender entradas en efectivo
 
 Un `rrpp` es exactamente un comprador normal (navega, compra, tiene sus
@@ -286,10 +321,10 @@ que se hayan marcado como exclusivas de esa residencia — nadie más las ve.
   teniendo su discoteca/sala normal, la residencia solo decide quién
   puede verla, no dónde se celebra.
 - **Cada residencia tiene su propio catálogo de merchandising** (sudaderas,
-  camisetas...) — de momento solo para ver, **no se puede comprar
-  todavía**. Solo un admin añade o borra productos
+  camisetas...) — **ya se puede comprar de verdad con Redsys**, ver la
+  sección dedicada más abajo. Solo un admin añade o borra productos
   (`POST`/`DELETE /api/residencias/:id/merchandise`); solo quien
-  pertenezca a esa residencia (o un admin) puede verlo
+  pertenezca a esa residencia (o un admin) puede verlo y comprarlo
   (`GET /api/residencias/:id/merchandise`) — mismo criterio de
   visibilidad que las fiestas exclusivas.
 - **Cada residencia tiene también su propia galería de fotos**, con el
@@ -543,7 +578,11 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/residencias/join`     |  ✓  | Te une a una residencia por su código. Body: `{ code }` |
 | POST   | `/api/residencias/leave`    |  ✓  | Dejas de pertenecer a tu residencia actual |
 | GET    | `/api/residencias/:id/merchandise` |  ✓  | Catálogo de una residencia — solo lo ve quien pertenezca a ella (o admin) |
-| POST   | `/api/residencias/:id/merchandise` |  ✓  | Añade un producto al catálogo. Body: `{ name, description, price, image }` — solo admin |
+| POST   | `/api/residencias/:id/merchandise` |  ✓  | Añade un producto al catálogo. Body: `{ name, description, price, image, stock }` — solo admin |
+| POST   | `/api/residencias/:id/merchandise/:merchId/pay` |  ✓  | Inicia un pago DE VERDAD con Redsys por unidades de un producto — solo quien pertenezca a esa residencia (o admin) |
+| GET    | `/api/me/merchandise`      |  ✓  | Tus productos comprados, con su código de recogida |
+| GET    | `/api/merchandise-purchases/:code/view` |  —  | Página pública con el QR de una unidad comprada — a esto lleva el enlace del email |
+| POST   | `/api/merchandise-purchases/:code/checkin` |  ✓  | Marca una unidad como entregada/recogida — solo admin |
 | DELETE | `/api/residencias/:id/merchandise/:itemId` |  ✓  | Borra un producto del catálogo — solo admin |
 | GET    | `/api/residencias/:id/photos` |  ✓  | Galería de fotos de una residencia — mismo criterio de acceso que el merchandising |
 | POST   | `/api/residencias/:id/photos` |  ✓  | Sube una foto. Body: `{ image, caption }` — solo admin |
@@ -589,7 +628,8 @@ backend/
     venues.js          listar y añadir discotecas/salas
     admin.js           buscar usuarios y cambiar su rol (solo admin)
     payments.js         formulario de pago, webhook de Redsys, estado del pedido
-    residencias.js       crear residencias, unirse por código, catálogo de merchandising y galería de fotos
+    residencias.js       crear residencias, unirse por código, catálogo de merchandising (con iniciar pago) y galería de fotos
+    merchandisePurchases.js  confirmar el pago, ver el QR y validar la entrega de un producto comprado
     users.js              buscar personas por nombre/nickname (para la venta en efectivo del RRPP)
 ```
 
@@ -688,13 +728,18 @@ backend/
 
 ## Próximos pasos naturales
 
-- **Poder comprar el merchandising** — de momento el catálogo es solo para
-  ver. El paso natural es reutilizar el mismo flujo de pago con Redsys que
-  ya tienen las entradas (`payment_orders` podría ampliarse para admitir
-  pedidos de merchandising, no solo de entradas, o crear una tabla
-  paralela `merchandise_orders` con el mismo patrón de pedido pendiente →
-  webhook → confirmado) — y en ese mismo momento conectarlo con los
-  puntos de fidelidad, que ya están preparados para admitirlo.
+- **Validar la entrega del merchandising desde la app** — el endpoint ya
+  existe y está probado (`POST /api/merchandise-purchases/:code/checkin`,
+  con el mismo bloqueo de "ya se entregó antes" que las entradas), pero
+  todavía no hay ninguna pantalla en la app que lo use — el escáner
+  actual (`ScannerScreen`) es específico de entradas. El paso natural
+  sería una pantalla gemela (o el mismo escáner con un selector de "modo
+  entrada / modo producto") para que un admin pueda marcarlas como
+  entregadas al recogerlas.
+- **Puntos de fidelidad para el merchandising** — de momento solo se
+  ganan/canjean comprando entradas; conectar también las compras de
+  merchandising sería sencillo dado que ya comparten el mismo patrón de
+  "pedido confirmado" (`confirmPaidMerchandiseOrder`).
 - **Reservar el aforo al iniciar el pago, no solo comprobarlo.** Ahora
   mismo, entre que alguien empieza a pagar y Redsys confirma, ese aforo no
   está "apartado" — si dos personas casi a la vez agotan las últimas

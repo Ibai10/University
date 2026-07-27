@@ -3,11 +3,36 @@ import { pool } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { buildPaymentForm, verifyNotification, isApproved } from "../redsys.js";
 import { confirmPaidOrder } from "./events.js";
+import { confirmPaidMerchandiseOrder } from "./merchandisePurchases.js";
 
 export const paymentsRouter = Router();
 
 function publicUrl() {
   return process.env.PUBLIC_APP_URL || "http://localhost:3001";
+}
+
+// El mismo webhook de Redsys sirve para dos tipos de pedido (entradas y
+// merchandising) — esta función busca en las dos tablas por el código de
+// pedido y dice cuál es, para que el resto del archivo no tenga que
+// duplicar esa lógica en cada ruta.
+async function findOrder(orderCode) {
+  const ticketOrder = await pool.query(
+    `SELECT payment_orders.*, events.title AS item_title
+     FROM payment_orders JOIN events ON events.id = payment_orders.event_id
+     WHERE payment_orders.order_code = $1`,
+    [orderCode]
+  );
+  if (ticketOrder.rows[0]) return { type: "ticket", order: ticketOrder.rows[0] };
+
+  const merchOrder = await pool.query(
+    `SELECT merchandise_orders.*, merchandise.name AS item_title
+     FROM merchandise_orders JOIN merchandise ON merchandise.id = merchandise_orders.merchandise_id
+     WHERE merchandise_orders.order_code = $1`,
+    [orderCode]
+  );
+  if (merchOrder.rows[0]) return { type: "merchandise", order: merchOrder.rows[0] };
+
+  return null;
 }
 
 // GET /api/payments/:orderCode/form
@@ -17,14 +42,9 @@ function publicUrl() {
 // hace de identificador de un solo uso.
 paymentsRouter.get("/:orderCode/form", async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT payment_orders.*, events.title AS event_title
-       FROM payment_orders JOIN events ON events.id = payment_orders.event_id
-       WHERE order_code = $1`,
-      [req.params.orderCode]
-    );
-    const order = rows[0];
-    if (!order) return res.status(404).send(renderMessagePage("Pedido no encontrado", "Revisa el enlace."));
+    const found = await findOrder(req.params.orderCode);
+    if (!found) return res.status(404).send(renderMessagePage("Pedido no encontrado", "Revisa el enlace."));
+    const { order } = found;
     if (order.status !== "pending") {
       return res.send(renderMessagePage("Este pedido ya se procesó", "Vuelve a la app para ver el resultado."));
     }
@@ -32,7 +52,7 @@ paymentsRouter.get("/:orderCode/form", async (req, res, next) => {
     const form = buildPaymentForm({
       orderCode: order.order_code,
       amountCents: order.amount_cents,
-      description: order.event_title,
+      description: order.item_title,
       merchantUrl: `${publicUrl()}/api/payments/notify`,
       urlOk: `${publicUrl()}/api/payments/${order.order_code}/ok`,
       urlKo: `${publicUrl()}/api/payments/${order.order_code}/ko`,
@@ -63,9 +83,9 @@ paymentsRouter.get("/:orderCode/form", async (req, res, next) => {
 // POST /api/payments/notify
 // A esta URL llama Redsys directamente (servidor a servidor), no el
 // navegador de nadie — es la confirmación de verdad, la única en la que
-// nos fiamos para crear las entradas. Redsys manda los datos como
-// formulario normal (no JSON), por eso este router usa su propio parser
-// de x-www-form-urlencoded (ver server.js).
+// nos fiamos para crear las entradas o las unidades de merchandising.
+// Redsys manda los datos como formulario normal (no JSON), por eso este
+// router usa su propio parser de x-www-form-urlencoded (ver server.js).
 paymentsRouter.post("/notify", async (req, res) => {
   try {
     const params = verifyNotification(req.body || {});
@@ -75,12 +95,13 @@ paymentsRouter.post("/notify", async (req, res) => {
     }
 
     const orderCode = params.Ds_Order;
-    const { rows } = await pool.query("SELECT id, status FROM payment_orders WHERE order_code = $1", [orderCode]);
-    const order = rows[0];
-    if (!order) {
+    const found = await findOrder(orderCode);
+    if (!found) {
       console.error("[redsys] Notificación de un pedido que no existe:", orderCode);
       return res.status(404).send("KO");
     }
+    const { type, order } = found;
+    const table = type === "ticket" ? "payment_orders" : "merchandise_orders";
 
     // Idempotencia: Redsys puede reintentar la misma notificación más de
     // una vez. Si ya lo procesamos, no lo repetimos.
@@ -89,7 +110,7 @@ paymentsRouter.post("/notify", async (req, res) => {
     }
 
     if (!isApproved(params)) {
-      await pool.query("UPDATE payment_orders SET status = 'failed', redsys_response = $1 WHERE id = $2", [
+      await pool.query(`UPDATE ${table} SET status = 'failed', redsys_response = $1 WHERE id = $2`, [
         params.Ds_Response || "desconocido",
         order.id,
       ]);
@@ -97,16 +118,20 @@ paymentsRouter.post("/notify", async (req, res) => {
     }
 
     // Guardamos la respuesta de Redsys antes de confirmar, para que quede
-    // registrada aunque algo falle a partir de aquí (p. ej. sin aforo).
-    await pool.query("UPDATE payment_orders SET redsys_response = $1 WHERE id = $2", [params.Ds_Response, order.id]);
+    // registrada aunque algo falle a partir de aquí (p. ej. sin aforo/stock).
+    await pool.query(`UPDATE ${table} SET redsys_response = $1 WHERE id = $2`, [params.Ds_Response, order.id]);
 
     try {
-      await confirmPaidOrder(orderCode);
+      if (type === "ticket") {
+        await confirmPaidOrder(orderCode);
+      } else {
+        await confirmPaidMerchandiseOrder(orderCode);
+      }
     } catch (err) {
-      // confirmPaidOrder ya deja el pedido en 'failed' si el motivo es
-      // falta de aforo — solo registramos el error, la respuesta a Redsys
-      // sigue siendo "OK" (la notificación en sí se procesó bien, el
-      // problema es nuestro, no de Redsys).
+      // confirmPaidOrder/confirmPaidMerchandiseOrder ya dejan el pedido en
+      // 'failed' si el motivo es falta de aforo/stock — solo registramos
+      // el error, la respuesta a Redsys sigue siendo "OK" (la notificación
+      // en sí se procesó bien, el problema es nuestro, no de Redsys).
       console.error(`[redsys] No se pudo confirmar el pedido ${orderCode}:`, err.message);
     }
 
@@ -122,24 +147,34 @@ paymentsRouter.post("/notify", async (req, res) => {
 // está abierto (o después de cerrarlo), para saber en cuanto se confirme.
 paymentsRouter.get("/:orderCode/status", requireAuth, async (req, res, next) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM payment_orders WHERE order_code = $1", [req.params.orderCode]);
-    const order = rows[0];
-    if (!order) return res.status(404).json({ error: "Pedido no encontrado." });
+    const found = await findOrder(req.params.orderCode);
+    if (!found) return res.status(404).json({ error: "Pedido no encontrado." });
+    const { type, order } = found;
     if (order.buyer_id !== req.user.id) {
       return res.status(403).json({ error: "Este pedido no es tuyo." });
     }
 
     let tickets = [];
+    let purchases = [];
     if (order.status === "paid") {
-      const ticketRows = await pool.query("SELECT * FROM tickets WHERE order_id = $1", [order.order_code]);
-      tickets = ticketRows.rows;
+      if (type === "ticket") {
+        const ticketRows = await pool.query("SELECT * FROM tickets WHERE order_id = $1", [order.order_code]);
+        tickets = ticketRows.rows;
+      } else {
+        const purchaseRows = await pool.query("SELECT * FROM merchandise_purchases WHERE order_id = $1", [
+          order.order_code,
+        ]);
+        purchases = purchaseRows.rows;
+      }
     }
 
     res.json({
       status: order.status,
+      type,
       tickets,
-      discountCents: order.discount_cents,
-      pointsRedeemed: order.points_redeemed,
+      purchases,
+      discountCents: order.discount_cents ?? 0,
+      pointsRedeemed: order.points_redeemed ?? 0,
     });
   } catch (err) {
     next(err);

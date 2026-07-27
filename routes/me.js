@@ -49,3 +49,28 @@ meRouter.get("/points", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+// GET /api/me/merchandise
+// "Mis productos" — mismo patrón que /me/tickets, pero para unidades de
+// merchandising compradas.
+meRouter.get("/merchandise", requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         merchandise_purchases.id, merchandise_purchases.code, merchandise_purchases.status,
+         merchandise_purchases.unit_price_cents, merchandise_purchases.purchased_at,
+         merchandise_purchases.delivered_at,
+         merchandise.id AS merchandise_id, merchandise.name, merchandise.description, merchandise.image_base64,
+         residencias.name AS residencia_name
+       FROM merchandise_purchases
+       JOIN merchandise ON merchandise.id = merchandise_purchases.merchandise_id
+       LEFT JOIN residencias ON residencias.id = merchandise.residencia_id
+       WHERE merchandise_purchases.buyer_id = $1
+       ORDER BY merchandise_purchases.purchased_at DESC`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});

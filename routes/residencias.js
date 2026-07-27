@@ -2,6 +2,8 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import { pool } from "../db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
+import { generateOrderCode } from "../redsys.js";
+import { stockAvailable } from "./merchandisePurchases.js";
 
 export const residenciasRouter = Router();
 
@@ -104,7 +106,13 @@ residenciasRouter.get("/:id/merchandise", requireAuth, async (req, res, next) =>
       "SELECT * FROM merchandise WHERE residencia_id = $1 ORDER BY created_at DESC",
       [residenciaId]
     );
-    res.json(rows);
+    const withStock = await Promise.all(
+      rows.map(async (item) => {
+        const available = await stockAvailable(item.id, item.stock);
+        return { ...item, available: available === Infinity ? null : available };
+      })
+    );
+    res.json(withStock);
   } catch (err) {
     next(err);
   }
@@ -121,7 +129,7 @@ residenciasRouter.post("/:id/merchandise", requireAuth, requireRole("admin"), as
       return res.status(404).json({ error: "Residencia no encontrada." });
     }
 
-    const { name, description, price, image } = req.body || {};
+    const { name, description, price, image, stock } = req.body || {};
     const trimmedName = String(name || "").trim();
     if (!trimmedName) {
       return res.status(400).json({ error: "El nombre del producto es obligatorio." });
@@ -134,14 +142,77 @@ residenciasRouter.post("/:id/merchandise", requireAuth, requireRole("admin"), as
     if (image && (typeof image !== "string" || image.length > MAX_MERCH_IMAGE_LENGTH)) {
       return res.status(400).json({ error: "La imagen es demasiado grande o no es válida." });
     }
+    let stockValue = null;
+    if (stock !== undefined && stock !== null && stock !== "") {
+      stockValue = Number(stock);
+      if (!Number.isInteger(stockValue) || stockValue < 0) {
+        return res.status(400).json({ error: "stock debe ser un entero mayor o igual a 0, o dejarse vacío para sin límite." });
+      }
+    }
 
     const { rows } = await pool.query(
-      `INSERT INTO merchandise (residencia_id, name, description, price_cents, image_base64, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO merchandise (residencia_id, name, description, price_cents, image_base64, stock, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [residenciaId, trimmedName, description || "", priceCents, image || null, req.user.id]
+      [residenciaId, trimmedName, description || "", priceCents, image || null, stockValue, req.user.id]
     );
-    res.status(201).json(rows[0]);
+    res.status(201).json({ ...rows[0], available: stockValue == null ? null : stockValue });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/residencias/:residenciaId/merchandise/:merchId/pay
+// Inicia un pago DE VERDAD con Redsys para comprar unidades de un
+// producto — mismo patrón que /api/events/:id/pay. Solo puede comprar
+// quien pertenezca a esa residencia (o un admin) — mismo criterio de
+// acceso que ya tiene el catálogo.
+residenciasRouter.post("/:residenciaId/merchandise/:merchId/pay", requireAuth, async (req, res, next) => {
+  try {
+    const residenciaId = Number(req.params.residenciaId);
+    const belongs = req.user.residenciaId === residenciaId;
+    if (!belongs && req.user.role !== "admin") {
+      return res.status(404).json({ error: "Residencia no encontrada." });
+    }
+
+    const merchResult = await pool.query("SELECT * FROM merchandise WHERE id = $1 AND residencia_id = $2", [
+      req.params.merchId,
+      residenciaId,
+    ]);
+    const merchandise = merchResult.rows[0];
+    if (!merchandise) return res.status(404).json({ error: "Producto no encontrado." });
+
+    const quantity = Number(req.body?.quantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      return res.status(400).json({ error: "quantity debe ser un entero mayor que 0." });
+    }
+
+    const available = await stockAvailable(merchandise.id, merchandise.stock);
+    if (quantity > available) {
+      return res.status(409).json({ error: `Solo quedan ${available} unidades disponibles.` });
+    }
+
+    const amountCents = merchandise.price_cents * quantity;
+
+    let orderCode = generateOrderCode();
+    while (
+      (await pool.query("SELECT id FROM payment_orders WHERE order_code = $1", [orderCode])).rows.length > 0 ||
+      (await pool.query("SELECT id FROM merchandise_orders WHERE order_code = $1", [orderCode])).rows.length > 0
+    ) {
+      orderCode = generateOrderCode();
+    }
+
+    await pool.query(
+      `INSERT INTO merchandise_orders (order_code, merchandise_id, buyer_id, quantity, amount_cents)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [orderCode, merchandise.id, req.user.id, quantity, amountCents]
+    );
+
+    const publicUrl = process.env.PUBLIC_APP_URL || "http://localhost:3001";
+    res.status(201).json({
+      orderCode,
+      paymentUrl: `${publicUrl}/api/payments/${orderCode}/form`,
+    });
   } catch (err) {
     next(err);
   }
