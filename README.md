@@ -138,6 +138,27 @@ datos, no el token — si un admin te asciende a `organizador`, puedes
 publicar fiestas al momento, sin tener que cerrar sesión y volver a
 entrar.
 
+## Borrar una discoteca (solo admin)
+
+`DELETE /api/venues/:id` — solo si no tiene ninguna fiesta **activa**
+(publicada y que todavía no haya terminado; una cancelada o una que ya
+pasó no cuenta, esas no bloquean el borrado). Si tiene alguna, responde
+409 con un mensaje explicando cuántas y qué hacer: *"No se puede borrar
+'X' porque tiene N fiesta(s) activa(s). Cancélala(s) primero, o espera a
+que termine(n)."*
+
+Al borrarla:
+- **A los validadores y RRPP que estuvieran asignados no se les toca el
+  rol** — solo se borra la asignación a ESA discoteca en concreto
+  (`venue_validators`/`venue_rrpp`), para que sigan pudiendo usarse si en
+  el futuro se les asigna a otra.
+- **Al organizador que la tuviera asignada** se le deja sin discoteca
+  asignada (`organizer_venue_id = NULL`) — como si un admin se la
+  quitara desde el panel — pero sigue siendo organizador.
+- Los eventos ya creados con esa categoría no se tocan ni se borran (la
+  categoría de un evento es texto libre, no una referencia a la tabla
+  `venues`) — solo desaparece la entrada de la lista de discotecas.
+
 ## Otras fiestas: panorama general para el admin
 
 Un admin ya veía todas las fiestas en el listado público de "Explorar",
@@ -561,6 +582,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
 | POST   | `/api/venues`               |  ✓  | Añade una discoteca nueva a la lista. Body: `{ name }` — requiere rol organizador o admin |
+| DELETE | `/api/venues/:id`           |  ✓  | Borra una discoteca — solo admin, y solo si no tiene ninguna fiesta activa |
 | GET    | `/api/venues/:id/validators` |  ✓  | Quién puede validar entradas de esta discoteca — organizador (solo la suya) o admin |
 | GET    | `/api/venues/:id/validators/search?q=` |  ✓  | Busca entre todas las cuentas con rol validador, por nombre/nickname/email |
 | POST   | `/api/venues/:id/validators` |  ✓  | Añade un validador a la discoteca. Body: `{ validator_id }` |

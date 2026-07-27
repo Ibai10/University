@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
+import { hasEventEnded } from "../eventTiming.js";
 
 export const venuesRouter = Router();
 
@@ -42,6 +43,45 @@ venuesRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
       [name, req.user.id]
     );
     res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/venues/:id
+// Borra una discoteca — solo admin, y solo si no tiene ninguna fiesta
+// ACTIVA (publicada y que todavía no haya terminado; una cancelada o una
+// ya pasada no cuenta, esas no bloquean el borrado).
+// A los validadores/RRPP que estuvieran asignados a esta discoteca NO se
+// les toca el rol — solo se borra la asignación a ESTA discoteca en
+// concreto, para que sigan pudiendo usarlo si algún día se les asigna a
+// otra. Al organizador que la tuviera asignada se le deja "sin discoteca
+// asignada" (como si un admin se la quitara desde el panel), no se le
+// borra la cuenta ni el rol.
+venuesRouter.delete("/:id", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const venueId = Number(req.params.id);
+    const venueResult = await pool.query("SELECT id, name FROM venues WHERE id = $1", [venueId]);
+    const venue = venueResult.rows[0];
+    if (!venue) return res.status(404).json({ error: "Esa discoteca no existe." });
+
+    const eventsResult = await pool.query(
+      "SELECT event_date, event_time, end_time FROM events WHERE category = $1 AND status = 'published' AND archived_at IS NULL",
+      [venue.name]
+    );
+    const activeCount = eventsResult.rows.filter((ev) => !hasEventEnded(ev)).length;
+    if (activeCount > 0) {
+      return res.status(409).json({
+        error: `No se puede borrar "${venue.name}" porque tiene ${activeCount} fiesta${activeCount > 1 ? "s" : ""} activa${activeCount > 1 ? "s" : ""}. Cancélala${activeCount > 1 ? "s" : ""} primero, o espera a que termine${activeCount > 1 ? "n" : ""}.`,
+      });
+    }
+
+    await pool.query("DELETE FROM venue_validators WHERE venue_id = $1", [venueId]);
+    await pool.query("DELETE FROM venue_rrpp WHERE venue_id = $1", [venueId]);
+    await pool.query("UPDATE users SET organizer_venue_id = NULL WHERE organizer_venue_id = $1", [venueId]);
+    await pool.query("DELETE FROM venues WHERE id = $1", [venueId]);
+
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
