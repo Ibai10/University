@@ -109,7 +109,25 @@ residenciasRouter.get("/:id/merchandise", requireAuth, async (req, res, next) =>
     const withStock = await Promise.all(
       rows.map(async (item) => {
         const available = await stockAvailable(item.id, item.stock);
-        return { ...item, available: available === Infinity ? null : available };
+        const enriched = { ...item, available: available === Infinity ? null : available };
+
+        // Las estadísticas de ventas/entregas son información de gestión
+        // (como "vendidas/validadas" en una fiesta) — solo se calculan y
+        // se muestran para un admin, no para un comprador normal mirando
+        // el catálogo.
+        if (req.user.role === "admin") {
+          const statsResult = await pool.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE status IN ('valid', 'used')) AS sold,
+               COUNT(*) FILTER (WHERE status = 'used') AS delivered
+             FROM merchandise_purchases WHERE merchandise_id = $1`,
+            [item.id]
+          );
+          enriched.sold = Number(statsResult.rows[0].sold);
+          enriched.delivered = Number(statsResult.rows[0].delivered);
+        }
+
+        return enriched;
       })
     );
     res.json(withStock);

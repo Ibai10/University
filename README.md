@@ -250,6 +250,11 @@ patrón de "una unidad, un código, un QR", mismo email de confirmación.
 - **`GET /api/me/merchandise`** es el equivalente de `/me/tickets` — cada
   unidad comprada con su código, para que la app tenga su propia sección
   de "Mis productos".
+- **El admin ve cuántas se han vendido y cuántas entregado, por
+  producto** — igual que "vendidas/validadas" en una fiesta.
+  `GET /api/residencias/:id/merchandise` incluye `sold` y `delivered`
+  cuando quien pregunta es admin (se omiten para un comprador normal
+  mirando el catálogo, es información de gestión, no de compra).
 - **La entrega/recogida se valida como una entrada**:
   `POST /api/merchandise-purchases/:code/checkin` marca una unidad como
   entregada (solo admin) — con el mismo bloqueo de "ya se entregó antes"
@@ -599,7 +604,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/residencias`          |  ✓  | Crea una residencia y le genera un código único. Body: `{ name }` — solo admin |
 | POST   | `/api/residencias/join`     |  ✓  | Te une a una residencia por su código. Body: `{ code }` |
 | POST   | `/api/residencias/leave`    |  ✓  | Dejas de pertenecer a tu residencia actual |
-| GET    | `/api/residencias/:id/merchandise` |  ✓  | Catálogo de una residencia — solo lo ve quien pertenezca a ella (o admin) |
+| GET    | `/api/residencias/:id/merchandise` |  ✓  | Catálogo de una residencia — solo lo ve quien pertenezca a ella (o admin). Para un admin, cada producto incluye además `sold`/`delivered` |
 | POST   | `/api/residencias/:id/merchandise` |  ✓  | Añade un producto al catálogo. Body: `{ name, description, price, image, stock }` — solo admin |
 | POST   | `/api/residencias/:id/merchandise/:merchId/pay` |  ✓  | Inicia un pago DE VERDAD con Redsys por unidades de un producto — solo quien pertenezca a esa residencia (o admin) |
 | GET    | `/api/me/merchandise`      |  ✓  | Tus productos comprados, con su código de recogida |
