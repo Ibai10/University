@@ -278,6 +278,37 @@ eventsRouter.get("/mine", requireAuth, async (req, res, next) => {
   }
 });
 
+// GET /api/events/others
+// Solo para un admin: todas las fiestas de TODOS los demás organizadores
+// (no las suyas propias, esas ya están en /mine) — con las mismas
+// estadísticas de gestión (vendidas, validadas, ingresos) que ve
+// cualquier organizador de las suyas. Pensado para que un admin pueda
+// echar un vistazo general sin tener que entrar cuenta por cuenta.
+eventsRouter.get("/others", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT events.*, residencias.name AS residencia_name,
+              users.name AS organizer_name, users.nickname AS organizer_nickname
+       FROM events
+       LEFT JOIN residencias ON residencias.id = events.residencia_id
+       LEFT JOIN users ON users.id = events.organizer_id
+       WHERE events.organizer_id != $1 AND events.archived_at IS NULL
+       ORDER BY events.created_at DESC`,
+      [req.user.id]
+    );
+    const withStats = await Promise.all(
+      rows.map(async (row) => {
+        const { organizer_name, organizer_nickname, ...rest } = row;
+        const event = await withAvailability(rest);
+        return { ...event, organizerName: organizer_name, organizerNickname: organizer_nickname };
+      })
+    );
+    res.json(withStats);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/events/:id
 eventsRouter.get("/:id", optionalAuth, async (req, res, next) => {
   try {

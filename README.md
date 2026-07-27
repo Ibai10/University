@@ -138,6 +138,27 @@ datos, no el token — si un admin te asciende a `organizador`, puedes
 publicar fiestas al momento, sin tener que cerrar sesión y volver a
 entrar.
 
+## Otras fiestas: panorama general para el admin
+
+Un admin ya veía todas las fiestas en el listado público de "Explorar",
+pero ahí solo se muestra lo que vería cualquier comprador (precio,
+disponibilidad) — no las estadísticas de gestión que solo ve el
+organizador de cada una (cuántas vendidas, cuántas validadas, ingresos).
+`GET /api/events/others` reúne justo eso, para todas las fiestas de
+**otros** organizadores (las tuyas propias siguen estando en
+`GET /api/events/mine`, no se duplican aquí):
+
+- Devuelve las mismas estadísticas (`sold`, `validated`, `soldViaRrpp`,
+  `available`) que ya calcula `withAvailability` para cualquier fiesta —
+  el admin la ve "como si fuera suya".
+- Incluye `organizerName` y `organizerNickname` (con un JOIN a `users`),
+  para saber de un vistazo quién organizó cada una.
+- El admin puede cancelarla o borrarla desde aquí exactamente igual que
+  si estuviera en su propio "Mis fiestas" — la comprobación de permisos
+  (`canManageEvent`) ya daba acceso total a cualquier fiesta para un
+  admin, esto solo añade la pantalla para verlas y gestionarlas todas
+  juntas sin tener que entrar cuenta por cuenta.
+
 ## Organizadores asignados a una discoteca
 
 Un organizador ya no puede publicar para cualquier discoteca — solo para
@@ -499,6 +520,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | PATCH  | `/api/events/:id/cancel`    |  ✓  | Cancela tu fiesta (conserva las entradas ya vendidas) |
 | DELETE | `/api/events/:id`           |  ✓  | Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
+| GET    | `/api/events/others`        |  ✓  | Todas las fiestas de los DEMÁS organizadores, con las mismas estadísticas — solo admin |
 | GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas — cada una incluye `expired: true` si es 'valid' y la fiesta ya terminó sin usarse |
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya y todavía no ha terminado. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
