@@ -728,14 +728,6 @@ backend/
 
 ## Próximos pasos naturales
 
-- **Validar la entrega del merchandising desde la app** — el endpoint ya
-  existe y está probado (`POST /api/merchandise-purchases/:code/checkin`,
-  con el mismo bloqueo de "ya se entregó antes" que las entradas), pero
-  todavía no hay ninguna pantalla en la app que lo use — el escáner
-  actual (`ScannerScreen`) es específico de entradas. El paso natural
-  sería una pantalla gemela (o el mismo escáner con un selector de "modo
-  entrada / modo producto") para que un admin pueda marcarlas como
-  entregadas al recogerlas.
 - **Puntos de fidelidad para el merchandising** — de momento solo se
   ganan/canjean comprando entradas; conectar también las compras de
   merchandising sería sencillo dado que ya comparten el mismo patrón de
