@@ -159,6 +159,36 @@ Al borrarla:
   categoría de un evento es texto libre, no una referencia a la tabla
   `venues`) — solo desaparece la entrada de la lista de discotecas.
 
+## Borrar una residencia (solo admin)
+
+`DELETE /api/residencias/:id` — mismo espíritu que borrar una discoteca,
+pero con dos condiciones en vez de una. Solo se puede si:
+
+1. **No tiene ninguna fiesta activa** — igual que con las discotecas
+   (publicada y todavía sin terminar; cancelada o ya pasada no cuenta).
+2. **Todo su merchandising ya está entregado** — ninguna unidad comprada
+   en estado `valid` (pendiente de recoger). Si hay alguna, responde 409:
+   *"No se puede borrar 'X' porque tiene N unidad(es) de merchandising
+   sin entregar todavía. Entrégala(s) primero."*
+
+Si ambas condiciones se cumplen:
+- **Los eventos que fueran exclusivos de esa residencia no se tocan ni se
+  borran** — solo dejan de ser exclusivos (`events.residencia_id =
+  NULL`), pasan a ser públicos. Esto solo puede afectar a fiestas
+  canceladas o ya pasadas, porque las activas ya bloquearon el borrado.
+- **Los productos de su catálogo tampoco se borran** — se quedan sin
+  residencia (`merchandise.residencia_id = NULL`, columna que se hizo
+  nullable justo para esto), y con ellos se conserva intacto el
+  historial de quien ya los compró: sigue viéndolos en "Mis productos"
+  con su nombre, su imagen y su estado, aunque la residencia ya no
+  exista. Es la misma idea que "borrar" una fiesta cancelada: no se
+  destruye nada que ya le importe a alguien.
+- **Las fotos sí se borran del todo** — no hay ningún historial de compra
+  o participación que proteger ahí.
+- **A quien perteneciera a esta residencia** se le deja sin residencia
+  asignada (`users.residencia_id = NULL`) — no se toca su cuenta ni su
+  rol.
+
 ## Otras fiestas: panorama general para el admin
 
 Un admin ya veía todas las fiestas en el listado público de "Explorar",
@@ -602,6 +632,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | PATCH  | `/api/admin/organizadores/:id/venue` |  ✓  | Asigna (o quita, con `venue_id: null`) la discoteca de un organizador — solo admin |
 | GET    | `/api/residencias`          |  ✓  | Lista las residencias con su código — solo admin |
 | POST   | `/api/residencias`          |  ✓  | Crea una residencia y le genera un código único. Body: `{ name }` — solo admin |
+| DELETE | `/api/residencias/:id`      |  ✓  | Borra una residencia — solo admin, solo si no tiene fiestas activas ni merchandising sin entregar |
 | POST   | `/api/residencias/join`     |  ✓  | Te une a una residencia por su código. Body: `{ code }` |
 | POST   | `/api/residencias/leave`    |  ✓  | Dejas de pertenecer a tu residencia actual |
 | GET    | `/api/residencias/:id/merchandise` |  ✓  | Catálogo de una residencia — solo lo ve quien pertenezca a ella (o admin). Para un admin, cada producto incluye además `sold`/`delivered` |

@@ -197,7 +197,10 @@ export async function initDb() {
     -- las fiestas exclusivas.
     CREATE TABLE IF NOT EXISTS merchandise (
       id SERIAL PRIMARY KEY,
-      residencia_id INTEGER NOT NULL REFERENCES residencias(id),
+      -- Nullable a propósito: si se borra la residencia, el producto (y
+      -- el historial de quien ya lo compró) no desaparece, solo se queda
+      -- "huérfano" de residencia — ver DELETE /api/residencias/:id.
+      residencia_id INTEGER REFERENCES residencias(id),
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
@@ -269,6 +272,7 @@ export async function initDb() {
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
     ALTER TABLE merchandise ADD COLUMN IF NOT EXISTS stock INTEGER;
+    ALTER TABLE merchandise ALTER COLUMN residencia_id DROP NOT NULL;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS points_redeemed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS discount_cents INTEGER NOT NULL DEFAULT 0;
 

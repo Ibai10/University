@@ -4,6 +4,7 @@ import { pool } from "../db.js";
 import { requireAuth, requireRole } from "../middleware/requireAuth.js";
 import { generateOrderCode } from "../redsys.js";
 import { stockAvailable } from "./merchandisePurchases.js";
+import { hasEventEnded } from "../eventTiming.js";
 
 export const residenciasRouter = Router();
 
@@ -47,6 +48,69 @@ residenciasRouter.post("/", requireAuth, requireRole("admin"), async (req, res, 
       [name, code, req.user.id]
     );
     res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/residencias/:id
+// Borra una residencia — solo admin, y solo si:
+//   1. No tiene ninguna fiesta ACTIVA (publicada y todavía sin terminar
+//      — igual que con las discotecas, una cancelada o ya pasada no
+//      cuenta).
+//   2. Todo su merchandising ya está entregado (ninguna compra en estado
+//      'valid' pendiente de recoger).
+residenciasRouter.delete("/:id", requireAuth, requireRole("admin"), async (req, res, next) => {
+  try {
+    const residenciaId = Number(req.params.id);
+    const residenciaResult = await pool.query("SELECT id, name FROM residencias WHERE id = $1", [residenciaId]);
+    const residencia = residenciaResult.rows[0];
+    if (!residencia) return res.status(404).json({ error: "Esa residencia no existe." });
+
+    const eventsResult = await pool.query(
+      "SELECT event_date, event_time, end_time FROM events WHERE residencia_id = $1 AND status = 'published' AND archived_at IS NULL",
+      [residenciaId]
+    );
+    const activeEventsCount = eventsResult.rows.filter((ev) => !hasEventEnded(ev)).length;
+    if (activeEventsCount > 0) {
+      return res.status(409).json({
+        error: `No se puede borrar "${residencia.name}" porque tiene ${activeEventsCount} fiesta${activeEventsCount > 1 ? "s" : ""} activa${activeEventsCount > 1 ? "s" : ""}. Cancélala${activeEventsCount > 1 ? "s" : ""} primero, o espera a que termine${activeEventsCount > 1 ? "n" : ""}.`,
+      });
+    }
+
+    const pendingResult = await pool.query(
+      `SELECT COUNT(*) AS pending
+       FROM merchandise_purchases
+       JOIN merchandise ON merchandise.id = merchandise_purchases.merchandise_id
+       WHERE merchandise.residencia_id = $1 AND merchandise_purchases.status = 'valid'`,
+      [residenciaId]
+    );
+    const pendingCount = Number(pendingResult.rows[0].pending);
+    if (pendingCount > 0) {
+      return res.status(409).json({
+        error: `No se puede borrar "${residencia.name}" porque tiene ${pendingCount} unidad${pendingCount > 1 ? "es" : ""} de merchandising sin entregar todavía. Entrégala${pendingCount > 1 ? "s" : ""} primero.`,
+      });
+    }
+
+    // A partir de aquí no queda nada que bloquee el borrado — se limpian
+    // las referencias sin destruir historial de nadie:
+    //   - Las fiestas (ya sean canceladas o pasadas) dejan de ser
+    //     exclusivas de esta residencia y pasan a ser públicas, pero no
+    //     se tocan ni se borran.
+    //   - Los productos dejan de pertenecer a ninguna residencia, pero se
+    //     conservan (y sus compras ya entregadas también), para que quien
+    //     ya los compró siga viéndolos en "Mis productos".
+    //   - Las fotos sí se borran del todo — no hay ningún historial de
+    //     compra o participación que proteger ahí.
+    //   - A quien perteneciera a esta residencia se le deja sin
+    //     residencia asignada — no se toca su cuenta ni su rol.
+    await pool.query("UPDATE events SET residencia_id = NULL WHERE residencia_id = $1", [residenciaId]);
+    await pool.query("UPDATE merchandise SET residencia_id = NULL WHERE residencia_id = $1", [residenciaId]);
+    await pool.query("DELETE FROM residencia_photos WHERE residencia_id = $1", [residenciaId]);
+    await pool.query("UPDATE users SET residencia_id = NULL WHERE residencia_id = $1", [residenciaId]);
+    await pool.query("DELETE FROM residencias WHERE id = $1", [residenciaId]);
+
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
