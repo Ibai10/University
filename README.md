@@ -322,6 +322,10 @@ plataforma — el dinero lo cobra el RRPP en persona.
   la vendió), y las estadísticas de cada fiesta (`GET /api/events/mine`)
   incluyen `soldViaRrpp` — cuántas de las vendidas fueron en efectivo,
   para diferenciarlas del resto.
+- **El organizador (o admin) puede ver el desglose por RRPP** de una
+  fiesta en concreto — `GET /api/events/:id/rrpp-sales` agrupa las
+  ventas en efectivo por quién las vendió, para saber cuántas ha vendido
+  cada RRPP, no solo el total.
 - Un admin puede hacer lo mismo que un RRPP (buscar y vender en
   efectivo), para cualquier fiesta, sin ninguna restricción de discoteca.
 
@@ -635,6 +639,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | DELETE | `/api/events/:id`           |  ✓  | Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
 | GET    | `/api/events/others`        |  ✓  | Todas las fiestas de los DEMÁS organizadores, con las mismas estadísticas — solo admin |
+| GET    | `/api/events/:id/rrpp-sales` |  ✓  | Desglose de cuántas entradas ha vendido cada RRPP en esa fiesta — organizador de su discoteca, o admin |
 | GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas — cada una incluye `expired: true` si es 'valid' y la fiesta ya terminó sin usarse |
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya y todavía no ha terminado. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |

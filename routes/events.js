@@ -706,6 +706,45 @@ async function canManageEvent(req, event) {
 // Cancela una fiesta (no la borra): deja de ser comprable y de aparecer en
 // el listado público, pero las entradas ya vendidas y su historial se
 // conservan intactos — quien ya compró sigue teniendo su entrada.
+// GET /api/events/:id/rrpp-sales
+// Desglose de cuántas entradas ha vendido cada RRPP en esta fiesta en
+// concreto — para que el organizador (o admin) pueda diferenciar entre
+// RRPP y saber cuánto ha vendido cada uno, no solo el total. Mismo
+// permiso que gestionar la fiesta (organizador de esa discoteca, o
+// admin).
+eventsRouter.get("/:id/rrpp-sales", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
+  try {
+    const { rows: eventRows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
+    const event = eventRows[0];
+    if (!event) return res.status(404).json({ error: "Evento no encontrado." });
+    if (!(await canManageEvent(req, event))) {
+      return res.status(403).json({ error: "Esta fiesta no es de tu discoteca." });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT users.id AS rrpp_id, users.name AS rrpp_name, users.nickname AS rrpp_nickname,
+              COUNT(*) AS count
+       FROM tickets
+       JOIN users ON users.id = tickets.sold_by_rrpp_id
+       WHERE tickets.event_id = $1 AND tickets.sold_by_rrpp_id IS NOT NULL AND tickets.status IN ('valid', 'used')
+       GROUP BY users.id, users.name, users.nickname
+       ORDER BY count DESC, users.name ASC`,
+      [event.id]
+    );
+
+    res.json(
+      rows.map((r) => ({
+        rrppId: r.rrpp_id,
+        rrppName: r.rrpp_name,
+        rrppNickname: r.rrpp_nickname,
+        count: Number(r.count),
+      }))
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 eventsRouter.patch("/:id/cancel", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
