@@ -65,7 +65,7 @@ paymentsRouter.get("/:orderCode/form", async (req, res, next) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Redirigiendo al pago...</title>
 </head>
-<body style="margin:0;background:#0E2429;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:Helvetica,Arial,sans-serif;">
+<body style="margin:0;background:#0A0712;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:Helvetica,Arial,sans-serif;">
   <p style="color:#F5F1E8;font-size:14px;">Te estamos llevando a la página de pago segura...</p>
   <form id="redsysForm" method="POST" action="${form.url}">
     <input type="hidden" name="Ds_SignatureVersion" value="${form.Ds_SignatureVersion}" />
@@ -199,10 +199,10 @@ function renderMessagePage(title, message) {
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>${title}</title></head>
-<body style="margin:0;background:#0E2429;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px;">
+<body style="margin:0;background:#0A0712;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px;">
   <div style="text-align:center;color:#F5F1E8;max-width:320px;">
     <h1 style="font-size:20px;">${title}</h1>
-    <p style="color:#8FA6A3;font-size:14px;">${message}</p>
+    <p style="color:#9B93A8;font-size:14px;">${message}</p>
   </div>
 </body>
 </html>`;
