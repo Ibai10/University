@@ -1,5 +1,5 @@
 {
-  "name": "eventos-backend",
+  "name": "festeo-backend",
   "version": "0.2.0",
   "description": "Backend de la app de eventos (graduaciones, universitarias y despedidas): API REST + PostgreSQL.",
   "type": "module",

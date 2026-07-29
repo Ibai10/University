@@ -94,7 +94,7 @@ export function buildPaymentForm({ orderCode, amountCents, description, merchant
     Ds_Merchant_UrlOK: urlOk,
     Ds_Merchant_UrlKO: urlKo,
     Ds_Merchant_ProductDescription: (description || "").slice(0, 125),
-    Ds_Merchant_MerchantName: "Fiestas Asturias",
+    Ds_Merchant_MerchantName: "Festeo",
   };
 
   const merchantParameters = Buffer.from(JSON.stringify(params), "utf8").toString("base64");

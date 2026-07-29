@@ -11,7 +11,7 @@ import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-const FROM = process.env.EMAIL_FROM || "Fiestas Asturias <onboarding@resend.dev>";
+const FROM = process.env.EMAIL_FROM || "Festeo <onboarding@resend.dev>";
 const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || "http://localhost:3001";
 
 function euros(cents) {

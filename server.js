@@ -36,7 +36,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "eventos-backend" });
+  res.json({ ok: true, service: "festeo-backend" });
 });
 
 app.use("/api/auth", authRouter);
