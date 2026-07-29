@@ -112,6 +112,14 @@ export async function initDb() {
       -- del día siguiente (ver eventTiming.js).
       end_time TEXT,
       price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+      -- price_cents sigue siendo el precio final, el que de verdad paga
+      -- el comprador (así no hay que tocar nada de lo que ya usa ese
+      -- campo — cobro, ingresos, Redsys...). base_price_cents y
+      -- commission_percent solo se guardan para que el organizador/admin
+      -- pueda ver el desglose de cómo se llegó a ese precio final:
+      -- price_cents = round(base_price_cents * (1 + commission_percent/100)).
+      base_price_cents INTEGER,
+      commission_percent NUMERIC(4,1) NOT NULL DEFAULT 0 CHECK (commission_percent >= 0 AND commission_percent <= 20),
       capacity INTEGER NOT NULL CHECK (capacity > 0),
       status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published','cancelled')),
       image_base64 TEXT,
@@ -282,6 +290,8 @@ export async function initDb() {
     ALTER TABLE events ADD COLUMN IF NOT EXISTS residencia_id INTEGER REFERENCES residencias(id);
     ALTER TABLE events ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     ALTER TABLE events ADD COLUMN IF NOT EXISTS limit_one_per_buyer BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS base_price_cents INTEGER;
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS commission_percent NUMERIC(4,1) NOT NULL DEFAULT 0;
     ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time TEXT;
 
     -- A qué discoteca está asignado un organizador (NULL = a ninguna

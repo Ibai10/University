@@ -375,9 +375,9 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
       return res.status(400).json({ error: "category (el nombre de la discoteca) es obligatorio." });
     }
 
-    const priceCents = Math.round(Number(price) * 100);
+    const basePriceCents = Math.round(Number(price) * 100);
     const cap = Number(capacity);
-    if (!Number.isFinite(priceCents) || priceCents < 0) {
+    if (!Number.isFinite(basePriceCents) || basePriceCents < 0) {
       return res.status(400).json({ error: "price debe ser un número mayor o igual a 0." });
     }
     if (!Number.isInteger(cap) || cap <= 0) {
@@ -386,6 +386,17 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
     if (image && (typeof image !== "string" || image.length > MAX_IMAGE_LENGTH)) {
       return res.status(400).json({ error: "La imagen es demasiado grande o no es válida." });
     }
+
+    // El precio que pone el organizador es el BASE — la comisión (0% a
+    // 20%) se suma encima para dar el precio final, que es el que de
+    // verdad se le cobra al comprador. price_cents (el campo que usa
+    // todo el resto del sistema: cobro, ingresos, Redsys) es siempre ese
+    // precio final ya con la comisión aplicada.
+    const commissionPercent = req.body?.commission_percent === undefined ? 0 : Number(req.body.commission_percent);
+    if (!Number.isFinite(commissionPercent) || commissionPercent < 0 || commissionPercent > 20) {
+      return res.status(400).json({ error: "commission_percent debe ser un número entre 0 y 20." });
+    }
+    const priceCents = Math.round(basePriceCents * (1 + commissionPercent / 100));
 
     let residenciaId = null;
     let residenciaName = null;
@@ -402,10 +413,10 @@ eventsRouter.post("/", requireAuth, requireRole("organizador", "admin"), async (
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, end_time, price_cents, capacity, image_base64, residencia_id, limit_one_per_buyer)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO events (organizer_id, title, category, description, location, event_date, event_time, end_time, price_cents, base_price_cents, commission_percent, capacity, image_base64, residencia_id, limit_one_per_buyer)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
-      [req.user.id, title, venueName, description || "", location, event_date, event_time, end_time, priceCents, cap, image || null, residenciaId, limitOnePerBuyer]
+      [req.user.id, title, venueName, description || "", location, event_date, event_time, end_time, priceCents, basePriceCents, commissionPercent, cap, image || null, residenciaId, limitOnePerBuyer]
     );
 
     res.status(201).json(await withAvailability({ ...rows[0], residencia_name: residenciaName }));

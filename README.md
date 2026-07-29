@@ -510,6 +510,29 @@ entradas no se queden válidas para siempre.
   marca como caducada, aunque la fiesta también haya terminado — ya tiene
   su propio estado definitivo.
 
+## Comisión sobre el precio de la entrada
+
+Al publicar, el organizador (o admin) pone el precio **base** de la
+entrada, y elige una comisión de entre **0% y 20%** — se suma encima del
+precio base para dar el precio final, que es el que de verdad paga quien
+compra.
+
+- `price_cents` sigue siendo, como siempre, el precio final — todo lo
+  que ya usa ese campo (el cobro real, los ingresos que se ven en "Tus
+  fiestas", el importe que se manda a Redsys) sigue funcionando sin
+  ningún cambio, porque sigue siendo el mismo precio de siempre, ya con
+  la comisión aplicada.
+- `base_price_cents` y `commission_percent` son nuevos, y solo están para
+  guardar el desglose de cómo se llegó a ese precio final — de dónde
+  salió, no cambian el comportamiento de cobro en ningún otro sitio.
+- El cálculo es `price_cents = round(base_price_cents * (1 +
+  commission_percent / 100))`, y se hace en el servidor al crear la
+  fiesta — el precio final que ve el organizador al publicar (y el que
+  paga después el comprador) son siempre el mismo número exacto.
+- Si no se manda `commission_percent`, se asume `0` — ninguna fiesta ya
+  creada antes de esta función se ve afectada, su precio final se queda
+  exactamente igual que estaba.
+
 ## Límite de 1 entrada por persona
 
 Al publicar una fiesta, el organizador (o admin) puede marcarla con
@@ -600,7 +623,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/auth/reset-password`  |  —  | Cambia la contraseña con el código. Body: `{ email, code, newPassword }` |
 | GET    | `/api/events`               |  —  | Lista fiestas publicadas. Filtros opcionales: `?category=Despedidas&q=gijon` |
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
-| POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64, `limit_one_per_buyer` y exige `end_time`) |
+| POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64, `limit_one_per_buyer`, `commission_percent` de 0 a 20, y exige `end_time`) |
 | POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
 | POST   | `/api/events/:id/cash-sale` |  ✓  | Un RRPP (o admin) vende entradas en efectivo a otras personas ya elegidas. Body: `{ buyer_ids: [...] }` — cada una recibe su propia entrada |
 | GET    | `/api/users/search?q=`      |  ✓  | Busca personas por nombre/nickname (sin email) — para que un RRPP encuentre a quién venderle. Rol rrpp o admin |
