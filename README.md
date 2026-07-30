@@ -374,14 +374,17 @@ el nickname del RRPP al pagar.
   notificación del banco), así que hace falta guardarla ahí para poder
   ponérsela luego a cada entrada cuando `confirmPaidOrder` las crea de
   verdad.
-- **Al final, esto escribe en el mismo `tickets.sold_by_rrpp_id`** que ya
-  usa la venta en efectivo — las dos vías quedan unificadas sin ningún
-  campo nuevo que las distinga; para el resto del sistema (estadísticas
-  de una fiesta, desglose por RRPP) da igual cómo se vendiera.
-- **`GET /api/me/rrpp-sales`** es "Mis ventas" para un RRPP — agrupa por
-  fiesta cuántas entradas ha vendido en total (en efectivo + por
-  nickname, juntas), para tener un resumen sin tener que mirar fiesta por
-  fiesta.
+- **Ambas vías comparten el mismo `tickets.sold_by_rrpp_id`**, pero se
+  distinguen con `tickets.rrpp_sale_type` (`'cash'` o `'referral'`) —
+  así se pueden ver juntas (el total de un RRPP) o separadas (cuánto ha
+  vendido en efectivo frente a por nickname). Las entradas vendidas antes
+  de que existiera esta distinción se quedan con `rrpp_sale_type = NULL`
+  — cuentan para el total, pero no se les puede asignar un tipo con
+  seguridad a estas alturas, así que no se les inventa uno.
+- **`GET /api/events/:id/rrpp-sales`** y **`GET /api/me/rrpp-sales`**
+  devuelven, además del total (`count`), el desglose `cashCount` y
+  `referralCount` para cada fiesta/RRPP — para diferenciar de un vistazo
+  cuánto se vendió de cada forma.
 
 ## Residencias de estudiantes
 
@@ -668,9 +671,9 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | DELETE | `/api/events/:id`           |  ✓  | Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
 | GET    | `/api/events/others`        |  ✓  | Todas las fiestas de los DEMÁS organizadores, con las mismas estadísticas — solo admin |
-| GET    | `/api/events/:id/rrpp-sales` |  ✓  | Desglose de cuántas entradas ha vendido cada RRPP en esa fiesta — organizador de su discoteca, o admin |
+| GET    | `/api/events/:id/rrpp-sales` |  ✓  | Desglose de cuántas entradas ha vendido cada RRPP en esa fiesta, distinguiendo `cashCount`/`referralCount` — organizador de su discoteca, o admin |
 | GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas — cada una incluye `expired: true` si es 'valid' y la fiesta ya terminó sin usarse |
-| GET    | `/api/me/rrpp-sales`        |  ✓  | "Mis ventas" de un RRPP: fiestas donde ha vendido entradas (en efectivo o por nickname), con el total de cada una |
+| GET    | `/api/me/rrpp-sales`        |  ✓  | "Mis ventas" de un RRPP: fiestas donde ha vendido entradas, con el total de cada una y el desglose `cashCount`/`referralCount` |
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya y todavía no ha terminado. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |

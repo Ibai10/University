@@ -85,7 +85,9 @@ meRouter.get("/rrpp-sales", requireAuth, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT events.id AS event_id, events.title, events.category, events.event_date, events.event_time,
-              events.status, COUNT(*) AS count
+              events.status, COUNT(*) AS count,
+              COUNT(*) FILTER (WHERE tickets.rrpp_sale_type = 'cash') AS cash_count,
+              COUNT(*) FILTER (WHERE tickets.rrpp_sale_type = 'referral') AS referral_count
        FROM tickets
        JOIN events ON events.id = tickets.event_id
        WHERE tickets.sold_by_rrpp_id = $1 AND tickets.status IN ('valid', 'used')
@@ -102,6 +104,8 @@ meRouter.get("/rrpp-sales", requireAuth, async (req, res, next) => {
         eventTime: r.event_time,
         status: r.status,
         count: Number(r.count),
+        cashCount: Number(r.cash_count),
+        referralCount: Number(r.referral_count),
       }))
     );
   } catch (err) {

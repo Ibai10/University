@@ -158,10 +158,12 @@ export async function initDb() {
       status TEXT NOT NULL DEFAULT 'valid' CHECK (status IN ('valid','used','refunded')),
       purchased_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       checked_in_at TIMESTAMPTZ,
-      -- Si no es NULL, esta entrada se vendió en efectivo por un RRPP (el
-      -- id de quien la vendió) en vez de comprarse por la propia persona
-      -- a través de la pasarela de pago.
-      sold_by_rrpp_id INTEGER REFERENCES users(id)
+      -- Si no es NULL, esta entrada se vendió a través de un RRPP (el id
+      -- de quien la vendió) — puede ser en efectivo, o una compra normal
+      -- (con tarjeta) donde el comprador puso el nickname del RRPP.
+      -- rrpp_sale_type distingue cuál de las dos fue.
+      sold_by_rrpp_id INTEGER REFERENCES users(id),
+      rrpp_sale_type TEXT CHECK (rrpp_sale_type IN ('cash', 'referral'))
     );
 
     -- Un pedido de pago con Redsys. Se crea en 'pending' al iniciar el
@@ -285,6 +287,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS rrpp_sale_type TEXT;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
     ALTER TABLE merchandise ADD COLUMN IF NOT EXISTS stock INTEGER;
     ALTER TABLE merchandise ALTER COLUMN residencia_id DROP NOT NULL;

@@ -32,7 +32,9 @@ export async function ticketStatsFor(eventId) {
     `SELECT
        COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used')), 0) AS sold,
        COALESCE(SUM(quantity) FILTER (WHERE status = 'used'), 0) AS validated,
-       COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used') AND sold_by_rrpp_id IS NOT NULL), 0) AS sold_via_rrpp
+       COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used') AND sold_by_rrpp_id IS NOT NULL), 0) AS sold_via_rrpp,
+       COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used') AND rrpp_sale_type = 'cash'), 0) AS sold_via_rrpp_cash,
+       COALESCE(SUM(quantity) FILTER (WHERE status IN ('valid', 'used') AND rrpp_sale_type = 'referral'), 0) AS sold_via_rrpp_referral
      FROM tickets WHERE event_id = $1`,
     [eventId]
   );
@@ -40,14 +42,25 @@ export async function ticketStatsFor(eventId) {
     sold: Number(rows[0].sold),
     validated: Number(rows[0].validated),
     soldViaRrpp: Number(rows[0].sold_via_rrpp),
+    soldViaRrppCash: Number(rows[0].sold_via_rrpp_cash),
+    soldViaRrppReferral: Number(rows[0].sold_via_rrpp_referral),
   };
 }
 
 async function withAvailability(event) {
-  const { sold, validated, soldViaRrpp } = await ticketStatsFor(event.id);
+  const { sold, validated, soldViaRrpp, soldViaRrppCash, soldViaRrppReferral } = await ticketStatsFor(event.id);
   const { residencia_name, ...rest } = event;
   const residencia = event.residencia_id ? { id: event.residencia_id, name: residencia_name } : null;
-  return { ...rest, sold, validated, soldViaRrpp, available: Math.max(0, event.capacity - sold), residencia };
+  return {
+    ...rest,
+    sold,
+    validated,
+    soldViaRrpp,
+    soldViaRrppCash,
+    soldViaRrppReferral,
+    available: Math.max(0, event.capacity - sold),
+    residencia,
+  };
 }
 
 export function genCode() {
@@ -135,10 +148,10 @@ export async function confirmPaidOrder(orderCode) {
     }
     const unitPrice = Math.round(order.amount_cents / order.quantity);
     const ticketResult = await pool.query(
-      `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id)
-       VALUES ($1, $2, 1, $3, $3, $4, $5, $6)
+      `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id, rrpp_sale_type)
+       VALUES ($1, $2, 1, $3, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [event.id, order.buyer_id, unitPrice, code, order.order_code, order.sold_by_rrpp_id]
+      [event.id, order.buyer_id, unitPrice, code, order.order_code, order.sold_by_rrpp_id, order.sold_by_rrpp_id ? "referral" : null]
     );
     tickets.push(ticketResult.rows[0]);
   }
@@ -514,10 +527,10 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
     for (let i = 0; i < quantity; i++) {
       const code = await uniqueCode();
       const { rows } = await pool.query(
-        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id)
-         VALUES ($1, $2, 1, $3, $3, $4, $5, $6)
+        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id, rrpp_sale_type)
+         VALUES ($1, $2, 1, $3, $3, $4, $5, $6, $7)
          RETURNING *`,
-        [event.id, req.user.id, event.price_cents, code, orderId, soldByRrppId]
+        [event.id, req.user.id, event.price_cents, code, orderId, soldByRrppId, soldByRrppId ? "referral" : null]
       );
       tickets.push(rows[0]);
     }
@@ -608,8 +621,8 @@ eventsRouter.post("/:id/cash-sale", requireAuth, requireRole("rrpp", "admin"), a
     for (const buyerId of buyerIds) {
       const code = await uniqueCode();
       const { rows } = await pool.query(
-        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id)
-         VALUES ($1, $2, 1, $3, $3, $4, $5, $6)
+        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id, rrpp_sale_type)
+         VALUES ($1, $2, 1, $3, $3, $4, $5, $6, 'cash')
          RETURNING *`,
         [event.id, buyerId, event.price_cents, code, orderId, req.user.id]
       );
@@ -778,7 +791,9 @@ eventsRouter.get("/:id/rrpp-sales", requireAuth, requireRole("organizador", "adm
 
     const { rows } = await pool.query(
       `SELECT users.id AS rrpp_id, users.name AS rrpp_name, users.nickname AS rrpp_nickname,
-              COUNT(*) AS count
+              COUNT(*) AS count,
+              COUNT(*) FILTER (WHERE tickets.rrpp_sale_type = 'cash') AS cash_count,
+              COUNT(*) FILTER (WHERE tickets.rrpp_sale_type = 'referral') AS referral_count
        FROM tickets
        JOIN users ON users.id = tickets.sold_by_rrpp_id
        WHERE tickets.event_id = $1 AND tickets.sold_by_rrpp_id IS NOT NULL AND tickets.status IN ('valid', 'used')
@@ -793,6 +808,8 @@ eventsRouter.get("/:id/rrpp-sales", requireAuth, requireRole("organizador", "adm
         rrppName: r.rrpp_name,
         rrppNickname: r.rrpp_nickname,
         count: Number(r.count),
+        cashCount: Number(r.cash_count),
+        referralCount: Number(r.referral_count),
       }))
     );
   } catch (err) {
