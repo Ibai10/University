@@ -57,6 +57,36 @@ export function genCode() {
   return s.slice(0, 4) + "-" + s.slice(4);
 }
 
+// Busca a un RRPP por nickname para atribuirle una venta normal (con
+// tarjeta, no en efectivo) — el comprador escribe el nickname al pagar.
+// Solo cuenta si esa cuenta es rrpp DE VERDAD y está asignada a la
+// discoteca de esa fiesta (venue_rrpp) — mismo criterio que ya usa la
+// venta en efectivo, para que no se le pueda atribuir una venta a
+// cualquiera solo por saber su nickname.
+export async function resolveRrppForVenue(rrppNickname, venueName) {
+  const trimmed = String(rrppNickname || "").trim();
+  if (!trimmed) return { rrppId: null, error: null };
+
+  const userResult = await pool.query("SELECT id, role FROM users WHERE LOWER(nickname) = LOWER($1)", [trimmed]);
+  const user = userResult.rows[0];
+  if (!user || user.role !== "rrpp") {
+    return { rrppId: null, error: "Ese nickname no corresponde a ninguna cuenta RRPP." };
+  }
+
+  const assignment = await pool.query(
+    `SELECT 1
+     FROM venue_rrpp
+     JOIN venues ON venues.id = venue_rrpp.venue_id
+     WHERE venue_rrpp.rrpp_id = $1 AND venues.name = $2`,
+    [user.id, venueName]
+  );
+  if (assignment.rows.length === 0) {
+    return { rrppId: null, error: "Ese RRPP no vende entradas de esta discoteca." };
+  }
+
+  return { rrppId: user.id, error: null };
+}
+
 // Confirma un pedido de pago 'pending' como pagado: crea las entradas (una
 // fila por cada una, con su propio código), mueve los puntos de fidelidad
 // (se canjean los usados, se ganan por lo pagado de verdad) y manda el
@@ -105,10 +135,10 @@ export async function confirmPaidOrder(orderCode) {
     }
     const unitPrice = Math.round(order.amount_cents / order.quantity);
     const ticketResult = await pool.query(
-      `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id)
-       VALUES ($1, $2, 1, $3, $3, $4, $5)
+      `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id)
+       VALUES ($1, $2, 1, $3, $3, $4, $5, $6)
        RETURNING *`,
-      [event.id, order.buyer_id, unitPrice, code, order.order_code]
+      [event.id, order.buyer_id, unitPrice, code, order.order_code, order.sold_by_rrpp_id]
     );
     tickets.push(ticketResult.rows[0]);
   }
@@ -458,6 +488,19 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
       return res.status(409).json({ error: `Solo quedan ${available} entradas disponibles.` });
     }
 
+    // Nickname opcional del RRPP a quien atribuir la venta — si viene, se
+    // valida de verdad (que exista, que sea rrpp, y que venda de esta
+    // discoteca) antes de seguir, para no dejar pasar un typo en silencio
+    // y que el RRPP se quede sin su venta sin que nadie se entere.
+    let soldByRrppId = null;
+    if (req.body?.rrpp_code) {
+      const resolved = await resolveRrppForVenue(req.body.rrpp_code, event.category);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      soldByRrppId = resolved.rrppId;
+    }
+
     async function uniqueCode() {
       let code = genCode();
       while ((await pool.query("SELECT id FROM tickets WHERE code = $1", [code])).rows.length > 0) {
@@ -471,10 +514,10 @@ eventsRouter.post("/:id/purchase", requireAuth, requireRole("comprador", "organi
     for (let i = 0; i < quantity; i++) {
       const code = await uniqueCode();
       const { rows } = await pool.query(
-        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id)
-         VALUES ($1, $2, 1, $3, $3, $4, $5)
+        `INSERT INTO tickets (event_id, buyer_id, quantity, unit_price_cents, total_cents, code, order_id, sold_by_rrpp_id)
+         VALUES ($1, $2, 1, $3, $3, $4, $5, $6)
          RETURNING *`,
-        [event.id, req.user.id, event.price_cents, code, orderId]
+        [event.id, req.user.id, event.price_cents, code, orderId, soldByRrppId]
       );
       tickets.push(rows[0]);
     }
@@ -633,6 +676,18 @@ eventsRouter.post(
         return res.status(409).json({ error: `Solo quedan ${available} entradas disponibles.` });
       }
 
+      // Nickname opcional del RRPP a quien atribuir la venta — se valida
+      // ya aquí, al iniciar el pago, para que el comprador vea el error
+      // al momento si se equivocó, no después de haber pagado.
+      let soldByRrppId = null;
+      if (req.body?.rrpp_code) {
+        const resolved = await resolveRrppForVenue(req.body.rrpp_code, event.category);
+        if (resolved.error) {
+          return res.status(400).json({ error: resolved.error });
+        }
+        soldByRrppId = resolved.rrppId;
+      }
+
       const rawFullAmount = event.price_cents * quantity;
       // No tiene sentido canjear más puntos de los que hacen falta para
       // cubrir el precio entero (redondeado a euros, que es como se
@@ -663,9 +718,9 @@ eventsRouter.post(
       }
 
       await pool.query(
-        `INSERT INTO payment_orders (order_code, event_id, buyer_id, quantity, amount_cents, points_redeemed, discount_cents)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [orderCode, event.id, req.user.id, quantity, amountCents, pointsUsed, discountCents]
+        `INSERT INTO payment_orders (order_code, event_id, buyer_id, quantity, amount_cents, points_redeemed, discount_cents, sold_by_rrpp_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [orderCode, event.id, req.user.id, quantity, amountCents, pointsUsed, discountCents, soldByRrppId]
       );
 
       // El descuento cubre el total entero: nada que cobrar de verdad, así

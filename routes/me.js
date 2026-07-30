@@ -74,3 +74,37 @@ meRouter.get("/merchandise", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+// GET /api/me/rrpp-sales
+// "Mis ventas" para un RRPP: las fiestas en las que ha vendido entradas
+// (por nickname en una compra normal, o en efectivo — las dos usan el
+// mismo sold_by_rrpp_id, así que salen juntas sin distinción aquí),
+// agrupadas por fiesta con el total de cada una. Cualquier rol puede
+// llamar a esto — si no ha vendido nada, simplemente sale vacío.
+meRouter.get("/rrpp-sales", requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT events.id AS event_id, events.title, events.category, events.event_date, events.event_time,
+              events.status, COUNT(*) AS count
+       FROM tickets
+       JOIN events ON events.id = tickets.event_id
+       WHERE tickets.sold_by_rrpp_id = $1 AND tickets.status IN ('valid', 'used')
+       GROUP BY events.id, events.title, events.category, events.event_date, events.event_time, events.status
+       ORDER BY events.event_date DESC, events.event_time DESC`,
+      [req.user.id]
+    );
+    res.json(
+      rows.map((r) => ({
+        eventId: r.event_id,
+        title: r.title,
+        category: r.category,
+        eventDate: r.event_date,
+        eventTime: r.event_time,
+        status: r.status,
+        count: Number(r.count),
+      }))
+    );
+  } catch (err) {
+    next(err);
+  }
+});

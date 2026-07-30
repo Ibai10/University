@@ -178,6 +178,12 @@ export async function initDb() {
       amount_cents INTEGER NOT NULL,
       points_redeemed INTEGER NOT NULL DEFAULT 0,
       discount_cents INTEGER NOT NULL DEFAULT 0,
+      -- Si el comprador escribió el nickname de un RRPP al pagar (compra
+      -- normal, no en efectivo), se guarda aquí desde que se inicia el
+      -- pago — las entradas todavía no existen en ese momento (se crean
+      -- al confirmar Redsys), así que hace falta guardarlo en el pedido
+      -- para poder ponerlo luego en cada entrada.
+      sold_by_rrpp_id INTEGER REFERENCES users(id),
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','failed')),
       redsys_response TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -279,6 +285,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'comprador';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
+    ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS sold_by_rrpp_id INTEGER REFERENCES users(id);
     ALTER TABLE merchandise ADD COLUMN IF NOT EXISTS stock INTEGER;
     ALTER TABLE merchandise ALTER COLUMN residencia_id DROP NOT NULL;
     ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS points_redeemed INTEGER NOT NULL DEFAULT 0;

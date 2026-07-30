@@ -354,6 +354,35 @@ discoteca) o un admin lo haya añadido explícitamente a `venue_rrpp`.
   para un admin desde el panel general de usuarios).
 - Un mismo RRPP puede estar asignado a varias discotecas a la vez.
 
+### Atribuir una compra normal a un RRPP, por nickname
+
+Además de la venta en efectivo, un RRPP también puede ganarse la venta de
+una compra **normal** (con tarjeta, por Redsys) — sin necesidad de
+enlaces especiales ni dominios propios: el comprador simplemente escribe
+el nickname del RRPP al pagar.
+
+- **`POST /api/events/:id/purchase`** y **`POST /api/events/:id/pay`**
+  aceptan un `rrpp_code` opcional (el nickname). Si se manda, se valida
+  al momento con el mismo criterio que la venta en efectivo — tiene que
+  existir, ser una cuenta `rrpp` de verdad, y estar asignada a la
+  discoteca de esa fiesta (`venue_rrpp`) — y si no cumple algo, se
+  rechaza con un mensaje claro (para que el comprador pueda corregir el
+  nickname antes de pagar, no después).
+- **Con Redsys, la atribución se guarda en el propio pedido**
+  (`payment_orders.sold_by_rrpp_id`) desde que se inicia el pago — las
+  entradas todavía no existen en ese momento (se crean al confirmar la
+  notificación del banco), así que hace falta guardarla ahí para poder
+  ponérsela luego a cada entrada cuando `confirmPaidOrder` las crea de
+  verdad.
+- **Al final, esto escribe en el mismo `tickets.sold_by_rrpp_id`** que ya
+  usa la venta en efectivo — las dos vías quedan unificadas sin ningún
+  campo nuevo que las distinga; para el resto del sistema (estadísticas
+  de una fiesta, desglose por RRPP) da igual cómo se vendiera.
+- **`GET /api/me/rrpp-sales`** es "Mis ventas" para un RRPP — agrupa por
+  fiesta cuántas entradas ha vendido en total (en efectivo + por
+  nickname, juntas), para tener un resumen sin tener que mirar fiesta por
+  fiesta.
+
 ## Residencias de estudiantes
 
 Una residencia es un grupo cerrado con su propio código de acceso: quien
@@ -628,10 +657,10 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/events`               |  —  | Lista fiestas publicadas. Filtros opcionales: `?category=Despedidas&q=gijon` |
 | GET    | `/api/events/:id`           |  —  | Detalle de una fiesta |
 | POST   | `/api/events`               |  ✓  | Publica una fiesta nueva (admite `image` en base64, `limit_one_per_buyer`, `commission_percent` de 0 a 20, y exige `end_time`) |
-| POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo) |
+| POST   | `/api/events/:id/purchase`  |  ✓  | Crea la entrada al momento, SIN pago real — pensado para pruebas rápidas, no para producción (ver "Pago con tarjeta" abajo). Admite `rrpp_code` opcional |
 | POST   | `/api/events/:id/cash-sale` |  ✓  | Un RRPP (o admin) vende entradas en efectivo a otras personas ya elegidas. Body: `{ buyer_ids: [...] }` — cada una recibe su propia entrada |
 | GET    | `/api/users/search?q=`      |  ✓  | Busca personas por nombre/nickname (sin email) — para que un RRPP encuentre a quién venderle. Rol rrpp o admin |
-| POST   | `/api/events/:id/pay`       |  ✓  | Inicia un pago con Redsys. Body: `{ quantity, points_to_redeem }` → `{ orderCode, paid, paymentUrl? , tickets? }`. Si los puntos cubren el total, `paid:true` y llegan las entradas ya creadas, sin pasar por el banco |
+| POST   | `/api/events/:id/pay`       |  ✓  | Inicia un pago con Redsys. Body: `{ quantity, points_to_redeem, rrpp_code }` → `{ orderCode, paid, paymentUrl? , tickets? }`. Si los puntos cubren el total, `paid:true` y llegan las entradas ya creadas, sin pasar por el banco |
 | GET    | `/api/me/points`            |  ✓  | Saldo de puntos de fidelidad y las tarifas vigentes |
 | POST   | `/api/payments/notify`      |  —  | Webhook de Redsys (servidor a servidor) — no lo llama nadie a mano |
 | GET    | `/api/payments/:orderCode/status` |  ✓  | Estado de un pedido de pago: `pending` / `paid` / `failed` |
@@ -641,6 +670,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | GET    | `/api/events/others`        |  ✓  | Todas las fiestas de los DEMÁS organizadores, con las mismas estadísticas — solo admin |
 | GET    | `/api/events/:id/rrpp-sales` |  ✓  | Desglose de cuántas entradas ha vendido cada RRPP en esa fiesta — organizador de su discoteca, o admin |
 | GET    | `/api/me/tickets`           |  ✓  | Tus entradas compradas — cada una incluye `expired: true` si es 'valid' y la fiesta ya terminó sin usarse |
+| GET    | `/api/me/rrpp-sales`        |  ✓  | "Mis ventas" de un RRPP: fiestas donde ha vendido entradas (en efectivo o por nickname), con el total de cada una |
 | POST   | `/api/tickets/:code/checkin`|  ✓  | Valida una entrada por su código (el que lleva el QR) y la marca como usada. Solo funciona si la fiesta es tuya y todavía no ha terminado. |
 | GET    | `/api/tickets/:code/view`   |  —  | Página pública con el QR de la entrada — a esto lleva el enlace del email |
 | GET    | `/api/venues`               |  —  | Lista las discotecas/salas conocidas (para el selector de categoría) |
