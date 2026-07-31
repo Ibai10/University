@@ -837,16 +837,20 @@ eventsRouter.patch("/:id/cancel", requireAuth, requireRole("organizador", "admin
 });
 
 // DELETE /api/events/:id
-// Dos comportamientos distintos según el estado:
+// Solo admin — un organizador ya no puede borrar fiestas de ninguna
+// manera, solo cancelarlas (PATCH /:id/cancel), para que siempre quede
+// un registro consultable de cuántas entradas se vendieron, incluso años
+// después. El admin sí puede borrar cualquier fiesta, sea suya o de
+// cualquier otro organizador — con dos comportamientos según el estado:
 //   - Si está CANCELADA: "borrarla" archiva la fila (desaparece de "Tus
-//     fiestas") pero no la elimina de verdad, sea cual sea el número de
-//     entradas vendidas — si se borrara de verdad, quien ya compró
-//     perdería su entrada de "Mis entradas" sin motivo. El QR y el
-//     historial de quien ya compró siguen intactos.
+//     fiestas"/"Otras fiestas") pero no la elimina de verdad, sea cual
+//     sea el número de entradas vendidas — si se borrara de verdad,
+//     quien ya compró perdería su entrada de "Mis entradas" sin motivo.
+//     El QR y el historial de quien ya compró siguen intactos.
 //   - Si sigue PUBLICADA: se borra de verdad, pero solo si nadie ha
 //     comprado entradas todavía (si ya se vendió alguna, hay que
 //     cancelarla primero).
-eventsRouter.delete("/:id", requireAuth, requireRole("organizador", "admin"), async (req, res, next) => {
+eventsRouter.delete("/:id", requireAuth, requireRole("admin"), async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT * FROM events WHERE id = $1", [req.params.id]);
     const event = rows[0];

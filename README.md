@@ -116,7 +116,7 @@ Cuatro roles, guardados en `users.role`:
 | Rol | Puede |
 |-----|-------|
 | `comprador` (por defecto) | Navegar y comprar entradas |
-| `organizador` | Todo lo del comprador + publicar/cancelar/borrar/validar fiestas — pero solo de la discoteca a la que un admin le haya asignado (ver sección más abajo) |
+| `organizador` | Todo lo del comprador + publicar/cancelar/validar fiestas — pero solo de la discoteca a la que un admin le haya asignado (ver sección más abajo). No puede borrarlas de forma definitiva, solo cancelarlas — eso queda reservado al admin |
 | `validador` | Validar entradas — pero solo de las discotecas donde un organizador o admin lo haya añadido explícitamente (ver "Organizadores asignados a una discoteca"). No puede comprar entradas ni organizar |
 | `rrpp` | Todo lo del comprador + vender entradas en efectivo — pero solo de las discotecas donde lo hayan añadido explícitamente (ver sección más abajo) |
 | `admin` | Todo, sobre cualquier fiesta (no solo las suyas) + gestionar el rol de otros usuarios |
@@ -211,6 +211,15 @@ organizador de cada una (cuántas vendidas, cuántas validadas, ingresos).
   juntas sin tener que entrar cuenta por cuenta.
 
 ## Organizadores asignados a una discoteca
+
+Un organizador **no puede borrar fiestas de forma definitiva** — solo
+cancelarlas (`PATCH /api/events/:id/cancel`). Borrar (`DELETE
+/api/events/:id`) es solo para un admin, sobre cualquier fiesta, sea suya
+o de cualquier otro organizador. Es a propósito: así siempre queda un
+registro consultable de cuántas entradas se vendió cada fiesta, aunque
+sea años después — un organizador no puede hacerlo desaparecer sin más.
+Cancelar sigue disponible para cualquiera de los dos, sin cambios: la
+fiesta deja de venderse pero se conserva igual.
 
 Un organizador ya no puede publicar para cualquier discoteca — solo para
 la que un admin le haya asignado, y solo ve/gestiona lo de esa discoteca,
@@ -668,7 +677,7 @@ Todas las rutas devuelven JSON. Las que requieren sesión necesitan el header
 | POST   | `/api/payments/notify`      |  —  | Webhook de Redsys (servidor a servidor) — no lo llama nadie a mano |
 | GET    | `/api/payments/:orderCode/status` |  ✓  | Estado de un pedido de pago: `pending` / `paid` / `failed` |
 | PATCH  | `/api/events/:id/cancel`    |  ✓  | Cancela tu fiesta (conserva las entradas ya vendidas) |
-| DELETE | `/api/events/:id`           |  ✓  | Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
+| DELETE | `/api/events/:id`           |  ✓  | Solo admin (de cualquier fiesta, suya o de otro organizador). Si ya está cancelada: la archiva (desaparece de "Mis fiestas", sin tocar las entradas ya vendidas). Si sigue publicada: la borra de verdad, solo si no tiene entradas vendidas |
 | GET    | `/api/events/mine`          |  ✓  | Tus fiestas publicadas, con ventas e ingresos |
 | GET    | `/api/events/others`        |  ✓  | Todas las fiestas de los DEMÁS organizadores, con las mismas estadísticas — solo admin |
 | GET    | `/api/events/:id/rrpp-sales` |  ✓  | Desglose de cuántas entradas ha vendido cada RRPP en esa fiesta, distinguiendo `cashCount`/`referralCount` — organizador de su discoteca, o admin |
