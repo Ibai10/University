@@ -110,7 +110,7 @@ merchandisePurchasesRouter.get("/:code/view", async (req, res, next) => {
       return res.status(404).send(renderMessagePage("Producto no encontrado", "Revisa que el enlace esté completo."));
     }
 
-    const qrDataUrl = await QRCode.toDataURL(purchase.code, { width: 260, margin: 1, color: { dark: "#0A0712", light: "#F5F1E8" } });
+    const qrDataUrl = await QRCode.toDataURL(purchase.code, { width: 260, margin: 1, color: { dark: "#050B1E", light: "#F5F1E8" } });
     const statusNote =
       purchase.status === "used"
         ? `<p style="color:#F0553D;font-size:13px;margin-top:16px;">Ya entregada el ${new Date(purchase.delivered_at).toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" })}.</p>`
@@ -123,13 +123,13 @@ merchandisePurchasesRouter.get("/:code/view", async (req, res, next) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tu producto — ${escapeHtml(purchase.merchandise_name)}</title>
 </head>
-<body style="margin:0;background:#0A0712;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:center;padding:32px 16px;">
-  <div style="max-width:420px;width:100%;background:#17111F;border:1px solid #332942;border-radius:20px;overflow:hidden;">
+<body style="margin:0;background:#050B1E;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:center;padding:32px 16px;">
+  <div style="max-width:420px;width:100%;background:#0C1730;border:1px solid #22355C;border-radius:20px;overflow:hidden;">
     <div style="padding:24px 24px 4px;">
       <h1 style="color:#F5F1E8;font-size:22px;margin:0 0 8px;">${escapeHtml(purchase.merchandise_name)}</h1>
-      <p style="color:#9B93A8;font-size:14px;margin:0;">Código de recogida</p>
+      <p style="color:#8B96C4;font-size:14px;margin:0;">Código de recogida</p>
     </div>
-    <div style="border-top:1px dashed #332942;margin:20px 0;"></div>
+    <div style="border-top:1px dashed #22355C;margin:20px 0;"></div>
     <div style="padding:0 24px 28px;text-align:center;">
       <img src="${qrDataUrl}" alt="QR" style="width:200px;height:200px;" />
       <p style="color:#E91E8C;font-family:monospace;font-size:20px;letter-spacing:0.1em;margin-top:12px;">${purchase.code}</p>
@@ -181,10 +181,10 @@ function renderMessagePage(title, message) {
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>${title}</title></head>
-<body style="margin:0;background:#0A0712;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px;">
+<body style="margin:0;background:#050B1E;font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px;">
   <div style="text-align:center;color:#F5F1E8;max-width:320px;">
     <h1 style="font-size:20px;">${title}</h1>
-    <p style="color:#9B93A8;font-size:14px;">${message}</p>
+    <p style="color:#8B96C4;font-size:14px;">${message}</p>
   </div>
 </body>
 </html>`;
